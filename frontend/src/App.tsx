@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { getCaptcha, verifyCaptcha, refreshCaptcha } from './captcha'
 import type {
   AgreementStatus,
   Credentials,
@@ -997,6 +998,64 @@ async function handleReplaceTag() {
   }
 
   if (!isAuthenticated) {
+    const [captchaUrl, setCaptchaUrl] = useState<string>('')
+    const [captchaCode, setCaptchaCode] = useState('')
+    const [captchaError, setCaptchaError] = useState('')
+
+    const loadCaptcha = async () => {
+      const url = await getCaptcha()
+      setCaptchaUrl(url)
+    }
+
+    useEffect(() => {
+      loadCaptcha()
+    }, [])
+
+    const refreshCaptchaImage = async () => {
+      const url = await refreshCaptcha()
+      setCaptchaUrl(url)
+      setCaptchaCode('')
+      setCaptchaError('')
+    }
+
+    const handleLoginWithCaptcha = async (e: React.FormEvent) => {
+      e.preventDefault()
+      if (!captchaCode.trim()) {
+        setCaptchaError('Введите код с картинки')
+        return
+      }
+
+      const verification = await verifyCaptcha(captchaCode)
+      if (!verification.ok) {
+        setCaptchaError(verification.error || 'Неверный код')
+        refreshCaptchaImage()
+        return
+      }
+
+      const nextCreds = { login: draftLogin.trim(), password: draftPassword }
+      setError(null)
+      setLoading(true)
+      try {
+        await apiFetch<InfoObjectPage>('/info-objects?page=0&size=1', nextCreds)
+        setCredentials(nextCreds)
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(nextCreds))
+        setHistoryStack([
+          {
+            tab: 'dashboard',
+            selectedInfoObject: null,
+            selectedFiles: [],
+          },
+        ])
+        setHistoryIndex(0)
+        setActiveTab('dashboard')
+      } catch {
+        setError('Не удалось войти. Проверьте логин и пароль.')
+        refreshCaptchaImage()
+      } finally {
+        setLoading(false)
+      }
+    }
+
     return (
       <div className="auth-shell">
         <div className="auth-card card">
@@ -1004,8 +1063,9 @@ async function handleReplaceTag() {
           <p className="auth-subtitle">React-интерфейс поверх текущего backend</p>
 
           {error && <div className="error">{error}</div>}
+          {captchaError && <div className="error">{captchaError}</div>}
 
-          <form onSubmit={handleLogin}>
+          <form onSubmit={handleLoginWithCaptcha}>
             <div className="field">
               <label>Логин</label>
               <input
@@ -1022,6 +1082,21 @@ async function handleReplaceTag() {
                 type="password"
                 value={draftPassword}
                 onChange={(e) => setDraftPassword(e.target.value)}
+              />
+            </div>
+
+            <div className="field">
+              <label>Код с картинки</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+                {captchaUrl && <img src={captchaUrl} alt="Captcha" style={{ border: '1px solid #ccc', borderRadius: '8px' }} />}
+                <button type="button" className="btn secondary" onClick={refreshCaptchaImage}>⟳</button>
+              </div>
+              <input
+                className="input"
+                type="text"
+                value={captchaCode}
+                onChange={(e) => setCaptchaCode(e.target.value)}
+                placeholder="Введите код"
               />
             </div>
 

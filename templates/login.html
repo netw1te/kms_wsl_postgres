@@ -3,7 +3,7 @@
 {% block content %}
 <div class="card" style="max-width: 420px; margin: 40px auto;">
   <h1>Вход</h1>
-  <p class="muted">Минимальный web-интерфейс СУЗ</p>
+  <p class="muted">Введите логин, пароль и код с картинки</p>
 
   {% if error %}
     <div class="error">{{ error }}</div>
@@ -20,6 +20,15 @@
       <input id="password" name="password" type="password" required />
     </div>
 
+    <div style="margin-bottom: 16px;">
+      <label>Код с картинки</label>
+      <div style="margin-bottom: 10px;">
+        <img id="captcha-img" src="/captcha/image" style="border:1px solid #ccc; border-radius:8px;" />
+        <button type="button" class="btn btn-secondary" style="margin-left:10px;" onclick="refreshCaptcha()">⟳</button>
+      </div>
+      <input id="captcha_code" name="captcha_code" type="text" required placeholder="Введите код" />
+    </div>
+
     <button class="btn" type="submit">Войти</button>
   </form>
 
@@ -27,4 +36,11 @@
     Тестовые пользователи: admin/admin123, user/user123
   </div>
 </div>
+
+<script>
+function refreshCaptcha() {
+  const img = document.getElementById('captcha-img');
+  img.src = '/captcha/image?_=' + new Date().getTime();
+}
+</script>
 {% endblock %}

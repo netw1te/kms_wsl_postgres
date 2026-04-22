@@ -14,9 +14,10 @@ from app.auth import authenticate_user
 from app.database import get_db
 from app.models.info_object import InfoObject
 from app.models.search_query import SearchQuery
+from app.models.captcha import Captcha
 from app.services.info_object_service import InfoObjectService
 from app.utils.date_parser import normalize_partial_date
-
+from datetime import datetime
 
 router = APIRouter(tags=["Web"])
 templates = Jinja2Templates(directory="templates")
@@ -33,9 +34,11 @@ def require_session_user(request: Request):
         return None
     return user
 
+
 def session_user_is_admin(user: dict) -> bool:
     role = user.get("role", "")
     return "ROLE_ADMIN" in [item.strip() for item in role.split(",") if item.strip()]
+
 
 def parse_tags(raw: str | None) -> list[str]:
     if not raw:
@@ -49,33 +52,53 @@ async def login_page(request: Request):
     user = session_user(request)
     if user:
         return RedirectResponse(url="/app", status_code=303)
-
-    return templates.TemplateResponse(
-        "login.html",
-        {
-            "request": request,
-            "error": None,
-            "session_user": None,
-        },
-    )
+    return templates.TemplateResponse("login.html", {"request": request, "error": None, "session_user": None})
 
 
 @router.post("/login", response_class=HTMLResponse)
 async def login_submit(
-    request: Request,
-    login: str = Form(...),
-    password: str = Form(...),
-    db: Session = Depends(get_db),
+        request: Request,
+        login: str = Form(...),
+        password: str = Form(...),
+        captcha_code: str = Form(...),
+        db: Session = Depends(get_db),
 ):
+    captcha_id = request.cookies.get("captcha_id")
+    if not captcha_id:
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "error": "Требуется капча", "session_user": None},
+            status_code=401,
+        )
+
+    captcha_record = db.query(Captcha).filter(
+        Captcha.session_id == captcha_id,
+        Captcha.expires_at > datetime.now(),
+        Captcha.used == 0
+    ).first()
+
+    if not captcha_record:
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "error": "Капча устарела, обновите страницу", "session_user": None},
+            status_code=401,
+        )
+
+    if captcha_record.text.upper() != captcha_code.strip().upper():
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "error": "Неверный код с картинки", "session_user": None},
+            status_code=401,
+        )
+
+    captcha_record.used = 1
+    db.commit()
+
     user = authenticate_user(db, login, password)
     if user is None:
         return templates.TemplateResponse(
             "login.html",
-            {
-                "request": request,
-                "error": "Неверный логин или пароль",
-                "session_user": None,
-            },
+            {"request": request, "error": "Неверный логин или пароль", "session_user": None},
             status_code=401,
         )
 
@@ -87,12 +110,6 @@ async def login_submit(
         "role": user.role,
     }
     return RedirectResponse(url="/app", status_code=303)
-
-
-@router.get("/logout")
-async def logout(request: Request):
-    request.session.clear()
-    return RedirectResponse(url="/login", status_code=303)
 
 
 @router.get("/app", response_class=HTMLResponse)
@@ -117,17 +134,17 @@ async def app_home(request: Request, db: Session = Depends(get_db)):
 
 @router.get("/app/info-objects", response_class=HTMLResponse)
 async def app_info_objects(
-    request: Request,
-    title: str | None = Query(None),
-    text: str | None = Query(None),
-    author: str | None = Query(None),
-    source: str | None = Query(None),
-    publication_title: str | None = Query(None),
-    doi: str | None = Query(None),
-    tags: str | None = Query(None),
-    page: int = Query(0, ge=0),
-    size: int = Query(20, ge=1, le=100),
-    db: Session = Depends(get_db),
+        request: Request,
+        title: str | None = Query(None),
+        text: str | None = Query(None),
+        author: str | None = Query(None),
+        source: str | None = Query(None),
+        publication_title: str | None = Query(None),
+        doi: str | None = Query(None),
+        tags: str | None = Query(None),
+        page: int = Query(0, ge=0),
+        size: int = Query(20, ge=1, le=100),
+        db: Session = Depends(get_db),
 ):
     user = require_session_user(request)
     if not user:
@@ -202,18 +219,18 @@ async def app_new_info_object(request: Request):
 
 @router.post("/app/info-objects/new", response_class=HTMLResponse)
 async def app_create_info_object(
-    request: Request,
-    title: str = Form(""),
-    content: str = Form(""),
-    source: str = Form(""),
-    author: str = Form(""),
-    url: str = Form(""),
-    doi: str = Form(""),
-    publication_title: str = Form(""),
-    publication_date_from_raw: str = Form(""),
-    publication_date_to_raw: str = Form(""),
-    tags_text: str = Form(""),
-    db: Session = Depends(get_db),
+        request: Request,
+        title: str = Form(""),
+        content: str = Form(""),
+        source: str = Form(""),
+        author: str = Form(""),
+        url: str = Form(""),
+        doi: str = Form(""),
+        publication_title: str = Form(""),
+        publication_date_from_raw: str = Form(""),
+        publication_date_to_raw: str = Form(""),
+        tags_text: str = Form(""),
+        db: Session = Depends(get_db),
 ):
     user = require_session_user(request)
     if not user:
@@ -244,11 +261,13 @@ async def app_create_info_object(
     saved = service.save(entity)
 
     return RedirectResponse(url=f"/app/info-objects/{saved.id}", status_code=303)
+
+
 @router.get("/app/info-objects/{info_object_id}", response_class=HTMLResponse)
 async def app_info_object_detail(
-    request: Request,
-    info_object_id: int,
-    db: Session = Depends(get_db),
+        request: Request,
+        info_object_id: int,
+        db: Session = Depends(get_db),
 ):
     user = require_session_user(request)
     if not user:
@@ -287,10 +306,10 @@ async def app_info_object_detail(
 
 @router.post("/app/info-objects/{info_object_id}/upload", response_class=HTMLResponse)
 async def app_upload_files_to_info_object(
-    request: Request,
-    info_object_id: int,
-    files: list[UploadFile] = File(...),
-    db: Session = Depends(get_db),
+        request: Request,
+        info_object_id: int,
+        files: list[UploadFile] = File(...),
+        db: Session = Depends(get_db),
 ):
     user = require_session_user(request)
     if not user:
@@ -308,10 +327,10 @@ async def app_upload_files_to_info_object(
 
 @router.post("/app/info-objects/{info_object_id}/files/{file_id}/delete", response_class=HTMLResponse)
 async def app_delete_file_from_info_object(
-    request: Request,
-    info_object_id: int,
-    file_id: int,
-    db: Session = Depends(get_db),
+        request: Request,
+        info_object_id: int,
+        file_id: int,
+        db: Session = Depends(get_db),
 ):
     user = require_session_user(request)
     if not user:
@@ -325,11 +344,13 @@ async def app_delete_file_from_info_object(
         is_admin=session_user_is_admin(user),
     )
     return RedirectResponse(url=f"/app/info-objects/{info_object_id}", status_code=303)
+
+
 @router.get("/app/info-objects/{info_object_id}/edit", response_class=HTMLResponse)
 async def app_edit_info_object_page(
-    request: Request,
-    info_object_id: int,
-    db: Session = Depends(get_db),
+        request: Request,
+        info_object_id: int,
+        db: Session = Depends(get_db),
 ):
     user = require_session_user(request)
     if not user:
@@ -375,19 +396,19 @@ async def app_edit_info_object_page(
 
 @router.post("/app/info-objects/{info_object_id}/edit", response_class=HTMLResponse)
 async def app_edit_info_object_submit(
-    request: Request,
-    info_object_id: int,
-    title: str = Form(""),
-    content: str = Form(""),
-    source: str = Form(""),
-    author: str = Form(""),
-    url: str = Form(""),
-    doi: str = Form(""),
-    publication_title: str = Form(""),
-    publication_date_from_raw: str = Form(""),
-    publication_date_to_raw: str = Form(""),
-    tags_text: str = Form(""),
-    db: Session = Depends(get_db),
+        request: Request,
+        info_object_id: int,
+        title: str = Form(""),
+        content: str = Form(""),
+        source: str = Form(""),
+        author: str = Form(""),
+        url: str = Form(""),
+        doi: str = Form(""),
+        publication_title: str = Form(""),
+        publication_date_from_raw: str = Form(""),
+        publication_date_to_raw: str = Form(""),
+        tags_text: str = Form(""),
+        db: Session = Depends(get_db),
 ):
     user = require_session_user(request)
     if not user:
