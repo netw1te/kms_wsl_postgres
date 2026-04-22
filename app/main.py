@@ -17,6 +17,7 @@ from app.api.routers.tags import router as tags_router
 from app.api.routers.user_agreements import router as user_agreements_router
 from app.api.routers.deletion_requests import router as deletion_requests_router
 from app.api.routers.captcha import router as captcha_router
+from app.api.routers.admin_export import router as admin_export_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -52,3 +53,4 @@ app.include_router(tags_router)
 app.include_router(user_agreements_router)
 app.include_router(deletion_requests_router)
 app.include_router(captcha_router)
+app.include_router(admin_export_router)

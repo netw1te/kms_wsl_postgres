@@ -121,6 +121,9 @@
           <a href="/app">Главная</a>
           <a href="/app/info-objects">ИО</a>
           <a href="/app/info-objects/new">Создать ИО</a>
+          {% if 'ROLE_ADMIN' in session_user.role %}
+            <a href="/app/admin/export">Администрирование ПО</a>
+          {% endif %}
           <a href="/logout">Выйти</a>
         </nav>
       {% endif %}

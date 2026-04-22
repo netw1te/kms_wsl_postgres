@@ -21,9 +21,9 @@
     </div>
 
     <div style="margin-bottom: 16px;">
-      <label>Код с картинки</label>
+      <label for="captcha_code">Код с картинки</label>
       <div style="margin-bottom: 10px;">
-        <img id="captcha-img" src="/captcha/image" style="border:1px solid #ccc; border-radius:8px;" />
+        <img id="captcha-img" src="/captcha/image" alt="CAPTCHA" style="border:1px solid #ccc; border-radius:8px;" />
         <button type="button" class="btn btn-secondary" style="margin-left:10px;" onclick="refreshCaptcha()">⟳</button>
       </div>
       <input id="captcha_code" name="captcha_code" type="text" required placeholder="Введите код" />

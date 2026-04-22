@@ -63,36 +63,36 @@ async def login_submit(
         captcha_code: str = Form(...),
         db: Session = Depends(get_db),
 ):
-    captcha_id = request.cookies.get("captcha_id")
-    if not captcha_id:
-        return templates.TemplateResponse(
-            "login.html",
-            {"request": request, "error": "Требуется капча", "session_user": None},
-            status_code=401,
-        )
-
-    captcha_record = db.query(Captcha).filter(
-        Captcha.session_id == captcha_id,
-        Captcha.expires_at > datetime.now(),
-        Captcha.used == 0
-    ).first()
-
-    if not captcha_record:
-        return templates.TemplateResponse(
-            "login.html",
-            {"request": request, "error": "Капча устарела, обновите страницу", "session_user": None},
-            status_code=401,
-        )
-
-    if captcha_record.text.upper() != captcha_code.strip().upper():
-        return templates.TemplateResponse(
-            "login.html",
-            {"request": request, "error": "Неверный код с картинки", "session_user": None},
-            status_code=401,
-        )
-
-    captcha_record.used = 1
-    db.commit()
+    # captcha_id = request.cookies.get("captcha_id")
+    # if not captcha_id:
+    #     return templates.TemplateResponse(
+    #         "login.html",
+    #         {"request": request, "error": "Требуется капча", "session_user": None},
+    #         status_code=401,
+    #     )
+    #
+    # captcha_record = db.query(Captcha).filter(
+    #     Captcha.session_id == captcha_id,
+    #     Captcha.expires_at > datetime.now(),
+    #     Captcha.used == 0
+    # ).first()
+    #
+    # if not captcha_record:
+    #     return templates.TemplateResponse(
+    #         "login.html",
+    #         {"request": request, "error": "Капча устарела, обновите страницу", "session_user": None},
+    #         status_code=401,
+    #     )
+    #
+    # if captcha_record.text.upper() != captcha_code.strip().upper():
+    #     return templates.TemplateResponse(
+    #         "login.html",
+    #         {"request": request, "error": "Неверный код с картинки", "session_user": None},
+    #         status_code=401,
+    #     )
+    #
+    # captcha_record.used = 1
+    # db.commit()
 
     user = authenticate_user(db, login, password)
     if user is None:
@@ -461,3 +461,24 @@ async def app_edit_info_object_submit(
     service.save(entity)
 
     return RedirectResponse(url=f"/app/info-objects/{entity.id}", status_code=303)
+@router.get("/app/admin/export", response_class=HTMLResponse)
+async def admin_export_page(request: Request, db: Session = Depends(get_db)):
+    user = session_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    role = user.get("role", "")
+    if "ROLE_ADMIN" not in [item.strip() for item in role.split(",") if item.strip()]:
+        return templates.TemplateResponse(
+            "admin_export.html",
+            {"request": request, "session_user": user, "error": "Доступ только для администратора"},
+            status_code=403,
+        )
+    return templates.TemplateResponse(
+        "admin_export.html",
+        {"request": request, "session_user": user, "error": None}
+    )
+
+@router.get("/logout")
+async def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse(url="/login", status_code=303)

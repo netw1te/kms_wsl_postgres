@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card">
+  <h1>Администрирование ПО</h1>
+  <p class="muted">Экспорт баз данных</p>
+
+  {% if error %}
+    <div class="error">{{ error }}</div>
+  {% endif %}
+
+  <div class="grid-2" style="margin-bottom: 24px;">
+    <div class="card">
+      <h2>Экспорт всех БД</h2>
+      <p class="muted">Полный дамп всех таблиц</p>
+      <a class="btn" href="/admin/export/all">Скачать ZIP</a>
+    </div>
+
+    <div class="card">
+      <h2>Экспорт БД СУЗ</h2>
+      <p class="muted">Только информационные объекты и метки</p>
+      <a class="btn" href="/admin/export/kms">Скачать ZIP</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Экспорт БД пользователя</h2>
+    <p class="muted">По логину</p>
+    <form method="get" action="/admin/export/user" style="margin-top: 16px;">
+      <div class="row">
+        <input type="text" name="login" placeholder="Логин пользователя" required style="flex: 1;" />
+        <button class="btn" type="submit">Экспортировать</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Импорт</h2>
+    <p class="muted">Будет добавлен в следующей версии</p>
+    <button class="btn secondary" disabled>Импорт БД</button>
+  </div>
+</div>
+{% endblock %}

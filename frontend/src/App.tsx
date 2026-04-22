@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { getCaptcha, verifyCaptcha, refreshCaptcha } from './captcha'
+import { exportAllDatabases, exportKmsDatabases, exportUserDatabase } from './adminExport'
 import type {
   AgreementStatus,
   Credentials,
@@ -997,6 +998,60 @@ async function handleReplaceTag() {
     }
   }
 
+  async function handleExportAll() {
+    if (!credentials) return
+    setLoading(true)
+    try {
+      const blob = await exportAllDatabases(credentials)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `kms_full_export_${new Date().toISOString().slice(0,19).replace(/:/g, '-')}.zip`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Ошибка экспорта')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleExportKms() {
+    if (!credentials) return
+    setLoading(true)
+    try {
+      const blob = await exportKmsDatabases(credentials)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `kms_export_${new Date().toISOString().slice(0,19).replace(/:/g, '-')}.zip`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Ошибка экспорта')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleExportUser(login: string) {
+    if (!credentials) return
+    setLoading(true)
+    try {
+      const blob = await exportUserDatabase(credentials, login)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `kms_user_${login}_export_${new Date().toISOString().slice(0,19).replace(/:/g, '-')}.zip`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Ошибка экспорта')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   if (!isAuthenticated) {
     const [captchaUrl, setCaptchaUrl] = useState<string>('')
     const [captchaCode, setCaptchaCode] = useState('')
@@ -1243,6 +1298,12 @@ async function handleReplaceTag() {
           {isAdmin && (
             <button className={`tab ${activeTab === 'delete-objects' ? 'active' : ''}`} onClick={() => navigateToTab('delete-objects')}>
               Удаление ИО
+            </button>
+          )}
+
+          {isAdmin && (
+            <button className={`tab ${activeTab === 'admin-export' ? 'active' : ''}`} onClick={() => navigateToTab('admin-export')}>
+              Экспорт БД
             </button>
           )}
 
@@ -1655,6 +1716,43 @@ async function handleReplaceTag() {
             ) : (
               <div className="muted">Запросов на удаление пока нет.</div>
             )}
+          </div>
+        )}
+        {activeTab === 'admin-export' && isAdmin && (
+          <div className="card">
+            <h2 className="section-title">Экспорт баз данных</h2>
+            <div className="grid-2" style={{ marginBottom: 24 }}>
+              <div className="card">
+                <h3>Экспорт всех БД</h3>
+                <p className="muted">Полный дамп всех таблиц</p>
+                <button className="btn" onClick={handleExportAll} disabled={loading}>Скачать ZIP</button>
+              </div>
+              <div className="card">
+                <h3>Экспорт БД СУЗ</h3>
+                <p className="muted">Только информационные объекты и метки</p>
+                <button className="btn" onClick={handleExportKms} disabled={loading}>Скачать ZIP</button>
+              </div>
+            </div>
+            <div className="card">
+              <h3>Экспорт БД пользователя</h3>
+              <p className="muted">Введите логин пользователя</p>
+              <div className="row">
+                <input
+                  id="export-user-login"
+                  type="text"
+                  placeholder="Логин пользователя"
+                  style={{ flex: 1 }}
+                />
+                <button className="btn" onClick={() => {
+                  const loginInput = document.getElementById('export-user-login') as HTMLInputElement
+                  if (loginInput.value.trim()) {
+                    handleExportUser(loginInput.value.trim())
+                  } else {
+                    setError('Введите логин пользователя')
+                  }
+                }} disabled={loading}>Экспортировать</button>
+              </div>
+            </div>
           </div>
         )}
         {activeTab === 'detail' && (

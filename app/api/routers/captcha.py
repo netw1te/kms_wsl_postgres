@@ -26,7 +26,14 @@ async def get_captcha(response: Response, db: Session = Depends(get_db)):
     db.add(captcha)
     db.commit()
 
-    response.set_cookie(key="captcha_id", value=session_id, httponly=True, max_age=600)
+    response.set_cookie(
+        key="captcha_id",
+        value=session_id,
+        httponly=True,
+        max_age=600,
+        path="/",
+        samesite="lax"
+    )
 
     return StreamingResponse(generate_captcha_image(text), media_type="image/png")
 
