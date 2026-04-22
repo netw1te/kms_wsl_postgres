@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card">
+  <h1>Список информационных объектов</h1>
+  <p class="muted">Поиск по основным полям</p>
+
+  {% if error %}
+    <div class="error">{{ error }}</div>
+  {% endif %}
+
+  <form method="get" action="/app/info-objects">
+    <div class="grid-3">
+      <div>
+        <label>Заголовок</label>
+        <input name="title" value="{{ filters.title }}" />
+      </div>
+      <div>
+        <label>Текст</label>
+        <input name="text" value="{{ filters.text }}" />
+      </div>
+      <div>
+        <label>Автор</label>
+        <input name="author" value="{{ filters.author }}" />
+      </div>
+      <div>
+        <label>Источник</label>
+        <input name="source" value="{{ filters.source }}" />
+      </div>
+      <div>
+        <label>Название публикации</label>
+        <input name="publication_title" value="{{ filters.publication_title }}" />
+      </div>
+      <div>
+        <label>DOI</label>
+        <input name="doi" value="{{ filters.doi }}" />
+      </div>
+    </div>
+
+    <div style="margin-top: 16px;">
+      <label>Метки (через запятую)</label>
+      <input name="tags" value="{{ filters.tags }}" />
+    </div>
+
+    <div style="margin-top: 16px;">
+      <button class="btn" type="submit">Искать</button>
+      <a class="btn btn-secondary" href="/app/info-objects">Сбросить</a>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="muted">Всего найдено: {{ total }}</div>
+</div>
+
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Заголовок</th>
+        <th>Автор</th>
+        <th>Источник</th>
+        <th>DOI</th>
+        <th>Метки</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      <tr>
+        <td>{{ item.id }}</td>
+        <td>
+        <a href="/app/info-objects/{{ item.id }}">
+          {{ item.title or ("ИО #" ~ item.id) }}
+        </a>
+        </td>
+        <td>{{ item.author or "" }}</td>
+        <td>{{ item.source or "" }}</td>
+        <td>{{ item.doi or "" }}</td>
+        <td>
+          {% for tag in item.tags %}
+            {{ tag.name }}{% if not loop.last %}, {% endif %}
+          {% endfor %}
+        </td>
+      </tr>
+      {% endfor %}
+      {% if not items %}
+      <tr>
+        <td colspan="6" class="muted">Нет данных</td>
+      </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

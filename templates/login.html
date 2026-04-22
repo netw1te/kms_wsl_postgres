@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card" style="max-width: 420px; margin: 40px auto;">
+  <h1>Вход</h1>
+  <p class="muted">Минимальный web-интерфейс СУЗ</p>
+
+  {% if error %}
+    <div class="error">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" action="/login">
+    <div style="margin-bottom: 16px;">
+      <label for="login">Логин</label>
+      <input id="login" name="login" type="text" required />
+    </div>
+
+    <div style="margin-bottom: 16px;">
+      <label for="password">Пароль</label>
+      <input id="password" name="password" type="password" required />
+    </div>
+
+    <button class="btn" type="submit">Войти</button>
+  </form>
+
+  <div style="margin-top: 16px;" class="muted small">
+    Тестовые пользователи: admin/admin123, user/user123
+  </div>
+</div>
+{% endblock %}

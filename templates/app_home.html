@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card">
+  <h1>Главная</h1>
+  <p>Вы вошли как <strong>{{ session_user.login }}</strong>.</p>
+  <p class="muted">Это первый минимальный web-интерфейс поверх уже работающего backend.</p>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <h2>Информационные объекты</h2>
+    <p>Всего ИО в системе: <strong>{{ total_info_objects }}</strong></p>
+    <a class="btn" href="/app/info-objects">Открыть список</a>
+  </div>
+
+  <div class="card">
+    <h2>Поисковые запросы</h2>
+    <p>Ваших сохранённых запросов: <strong>{{ my_queries_count }}</strong></p>
+    <a class="btn btn-secondary" href="/docs">Пока смотреть через Swagger</a>
+  </div>
+</div>
+{% endblock %}

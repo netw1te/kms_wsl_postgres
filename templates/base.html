@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>{{ title if title else "СУЗ" }}</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      background: #f4f6fb;
+      color: #1e293b;
+    }
+    header {
+      background: white;
+      border-bottom: 1px solid #dbe2ea;
+      padding: 16px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    nav a {
+      margin-right: 16px;
+      text-decoration: none;
+      color: #1d4ed8;
+      font-weight: 600;
+    }
+    .container {
+      max-width: 1100px;
+      margin: 24px auto;
+      padding: 0 16px;
+    }
+    .card {
+      background: white;
+      border: 1px solid #dbe2ea;
+      border-radius: 14px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    input, textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    textarea {
+      min-height: 120px;
+      resize: vertical;
+    }
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px;
+    }
+    .btn {
+      display: inline-block;
+      background: #2563eb;
+      color: white;
+      border: none;
+      border-radius: 12px;
+      padding: 10px 16px;
+      text-decoration: none;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .btn-secondary {
+      background: #e2e8f0;
+      color: #0f172a;
+    }
+    .muted {
+      color: #64748b;
+    }
+    .error {
+      color: #b91c1c;
+      background: #fee2e2;
+      border: 1px solid #fecaca;
+      padding: 12px;
+      border-radius: 10px;
+      margin-bottom: 16px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+    }
+    th, td {
+      border-bottom: 1px solid #e2e8f0;
+      padding: 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f8fafc;
+    }
+    .small {
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div><strong>Система управления знаниями</strong></div>
+    <div>
+      {% if session_user %}
+        <span class="muted small">
+          {{ session_user.login }} | {{ session_user.role }}
+        </span>
+        &nbsp;&nbsp;
+        <nav style="display:inline;">
+          <a href="/app">Главная</a>
+          <a href="/app/info-objects">ИО</a>
+          <a href="/app/info-objects/new">Создать ИО</a>
+          <a href="/logout">Выйти</a>
+        </nav>
+      {% endif %}
+    </div>
+  </header>
+  <div class="container">
+    {% block content %}{% endblock %}
+  </div>
+</body>
+</html>

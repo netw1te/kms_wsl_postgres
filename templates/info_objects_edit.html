@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card">
+  <h1>Редактирование информационного объекта</h1>
+
+  {% if error %}
+    <div class="error">{{ error }}</div>
+  {% endif %}
+
+  {% if item %}
+  <form method="post" action="/app/info-objects/{{ item.id }}/edit">
+    <div class="grid-2">
+      <div>
+        <label>Заголовок</label>
+        <input name="title" value="{{ item.title or '' }}" />
+      </div>
+      <div>
+        <label>Автор</label>
+        <input name="author" value="{{ item.author or '' }}" />
+      </div>
+    </div>
+
+    <div style="margin-top: 16px;">
+      <label>Текст</label>
+      <textarea name="content">{{ item.content or '' }}</textarea>
+    </div>
+
+    <div class="grid-2" style="margin-top: 16px;">
+      <div>
+        <label>Источник</label>
+        <input name="source" value="{{ item.source or '' }}" />
+      </div>
+      <div>
+        <label>URL</label>
+        <input name="url" value="{{ item.url or '' }}" />
+      </div>
+    </div>
+
+    <div class="grid-2" style="margin-top: 16px;">
+      <div>
+        <label>DOI</label>
+        <input name="doi" value="{{ item.doi or '' }}" />
+      </div>
+      <div>
+        <label>Название публикации</label>
+        <input name="publication_title" value="{{ item.publication_title or '' }}" />
+      </div>
+    </div>
+
+    <div class="grid-2" style="margin-top: 16px;">
+      <div>
+        <label>Дата от</label>
+        <input name="publication_date_from_raw" value="{{ item.publication_date_from_raw or '' }}" />
+      </div>
+      <div>
+        <label>Дата до</label>
+        <input name="publication_date_to_raw" value="{{ item.publication_date_to_raw or '' }}" />
+      </div>
+    </div>
+
+    <div style="margin-top: 16px;">
+      <label>Метки (через запятую)</label>
+      <input
+        name="tags_text"
+        value="{% for tag in item.tags %}{{ tag.name if tag.name is defined else tag }}{% if not loop.last %}, {% endif %}{% endfor %}"
+      />
+    </div>
+
+    <div style="margin-top: 16px;">
+      <button class="btn" type="submit">Сохранить изменения</button>
+      <a class="btn btn-secondary" href="/app/info-objects/{{ item.id }}">Отмена</a>
+    </div>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}
