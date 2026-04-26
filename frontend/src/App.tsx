@@ -223,7 +223,9 @@ export default function App() {
       return null
     }
   })
-
+  const [captchaUrl, setCaptchaUrl] = useState('')
+  const [captchaCode, setCaptchaCode] = useState('')
+  const [captchaError, setCaptchaError] = useState('')
   const [historyStack, setHistoryStack] = useState<ViewState[]>([
   {
       tab: 'dashboard',
@@ -249,7 +251,6 @@ export default function App() {
     email: '',
     role: 'ROLE_USER',
   })
-
   const [selectedDeletionRequest, setSelectedDeletionRequest] = useState<DeletionRequestStatus | null>(null)
   const [historyIndex, setHistoryIndex] = useState(0)
   const [deletionRequests, setDeletionRequests] = useState<DeletionRequestRecord[]>([])
@@ -287,6 +288,11 @@ export default function App() {
   const isAdmin = !!currentUser?.role?.includes('ROLE_ADMIN')
   const canGoBack = historyIndex > 0
   const canGoForward = historyIndex < historyStack.length - 1
+  useEffect(() => {
+    if (!isAuthenticated) {
+      void loadCaptchaImage()
+    }
+  }, [isAuthenticated])
   useEffect(() => {
     if (!credentials) return
     void loadDashboard()
@@ -460,8 +466,36 @@ export default function App() {
       },
     ])
     setHistoryIndex(0)
+    setCaptchaCode('')
+    setCaptchaError('')
+    setCaptchaUrl((prev) => {
+      if (prev) {
+        URL.revokeObjectURL(prev)
+      }
+      return ''
+    })
+  }
+  async function loadCaptchaImage() {
+    const url = await getCaptcha()
+    setCaptchaUrl((prev) => {
+      if (prev) {
+        URL.revokeObjectURL(prev)
+      }
+      return url
+    })
   }
 
+  async function refreshCaptchaImage() {
+    const url = await refreshCaptcha()
+    setCaptchaUrl((prev) => {
+      if (prev) {
+        URL.revokeObjectURL(prev)
+      }
+      return url
+    })
+    setCaptchaCode('')
+    setCaptchaError('')
+  }
   async function handleSearch() {
     if (!credentials) return
     setLoading(true)
@@ -523,6 +557,46 @@ export default function App() {
     }
   }
 
+  async function handleLoginWithCaptcha(e: React.FormEvent) {
+    e.preventDefault()
+
+    if (!captchaCode.trim()) {
+      setCaptchaError('Введите код с картинки')
+      return
+    }
+
+    const verification = await verifyCaptcha(captchaCode)
+    if (!verification.ok) {
+      setCaptchaError(verification.error || 'Неверный код')
+      await refreshCaptchaImage()
+      return
+    }
+
+    const nextCreds = { login: draftLogin.trim(), password: draftPassword }
+    setError(null)
+    setLoading(true)
+    try {
+      await apiFetch<InfoObjectPage>('/info-objects?page=0&size=1', nextCreds)
+      setCredentials(nextCreds)
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextCreds))
+      setHistoryStack([
+        {
+          tab: 'dashboard',
+          selectedInfoObject: null,
+          selectedFiles: [],
+        },
+      ])
+      setHistoryIndex(0)
+      setActiveTab('dashboard')
+      setCaptchaError('')
+      setCaptchaCode('')
+    } catch {
+      setError('Не удалось войти. Проверьте логин и пароль.')
+      await refreshCaptchaImage()
+    } finally {
+      setLoading(false)
+    }
+  }
   async function handleApproveDeletionRequest(requestId: number) {
     if (!credentials) return
 
@@ -1053,64 +1127,6 @@ async function handleReplaceTag() {
   }
 
   if (!isAuthenticated) {
-    const [captchaUrl, setCaptchaUrl] = useState<string>('')
-    const [captchaCode, setCaptchaCode] = useState('')
-    const [captchaError, setCaptchaError] = useState('')
-
-    const loadCaptcha = async () => {
-      const url = await getCaptcha()
-      setCaptchaUrl(url)
-    }
-
-    useEffect(() => {
-      loadCaptcha()
-    }, [])
-
-    const refreshCaptchaImage = async () => {
-      const url = await refreshCaptcha()
-      setCaptchaUrl(url)
-      setCaptchaCode('')
-      setCaptchaError('')
-    }
-
-    const handleLoginWithCaptcha = async (e: React.FormEvent) => {
-      e.preventDefault()
-      if (!captchaCode.trim()) {
-        setCaptchaError('Введите код с картинки')
-        return
-      }
-
-      const verification = await verifyCaptcha(captchaCode)
-      if (!verification.ok) {
-        setCaptchaError(verification.error || 'Неверный код')
-        refreshCaptchaImage()
-        return
-      }
-
-      const nextCreds = { login: draftLogin.trim(), password: draftPassword }
-      setError(null)
-      setLoading(true)
-      try {
-        await apiFetch<InfoObjectPage>('/info-objects?page=0&size=1', nextCreds)
-        setCredentials(nextCreds)
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(nextCreds))
-        setHistoryStack([
-          {
-            tab: 'dashboard',
-            selectedInfoObject: null,
-            selectedFiles: [],
-          },
-        ])
-        setHistoryIndex(0)
-        setActiveTab('dashboard')
-      } catch {
-        setError('Не удалось войти. Проверьте логин и пароль.')
-        refreshCaptchaImage()
-      } finally {
-        setLoading(false)
-      }
-    }
-
     return (
       <div className="auth-shell">
         <div className="auth-card card">

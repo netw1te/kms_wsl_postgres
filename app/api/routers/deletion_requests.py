@@ -1,4 +1,5 @@
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -7,7 +8,9 @@ from sqlalchemy.orm import Session
 from app.auth import CurrentUser, get_current_user, require_admin
 from app.database import get_db
 from app.models.info_object import InfoObject
+from app.models.info_object_attachment import InfoObjectAttachment
 from app.models.info_object_deletion_request import InfoObjectDeletionRequest
+from app.models.media_file import MediaFile
 
 
 router = APIRouter(prefix="/deletion-requests", tags=["Запросы на удаление"])
@@ -27,12 +30,14 @@ class DeletionRequestResponse(BaseModel):
     status: str
     created_at: datetime
 
+
 class DeletionRequestStatusResponse(BaseModel):
     exists: bool
     id: int | None = None
     status: str | None = None
     reason: str | None = None
     replacement_info_object_id: int | None = None
+
 
 def serialize_request(item: InfoObjectDeletionRequest) -> DeletionRequestResponse:
     return DeletionRequestResponse(
@@ -123,6 +128,16 @@ async def approve_delete_request(
 
 
     (
+        db.query(InfoObject)
+        .filter(InfoObject.replacement_info_object_id == info_object_id)
+        .update(
+            {InfoObject.replacement_info_object_id: None},
+            synchronize_session=False,
+        )
+    )
+
+
+    (
         db.query(InfoObjectDeletionRequest)
         .filter(InfoObjectDeletionRequest.replacement_info_object_id == info_object_id)
         .update(
@@ -132,15 +147,47 @@ async def approve_delete_request(
     )
 
 
+    attachment_rows = (
+        db.query(InfoObjectAttachment)
+        .filter(InfoObjectAttachment.info_object_id == info_object_id)
+        .all()
+    )
+    media_file_ids = [row.media_file_id for row in attachment_rows]
+
+
+    (
+        db.query(InfoObjectAttachment)
+        .filter(InfoObjectAttachment.info_object_id == info_object_id)
+        .delete(synchronize_session=False)
+    )
+
+
     (
         db.query(InfoObjectDeletionRequest)
         .filter(InfoObjectDeletionRequest.info_object_id == info_object_id)
         .delete(synchronize_session=False)
     )
 
-    # 3. Удаляем сам ИО физически
+  
+    for media_file_id in media_file_ids:
+        remaining_links = (
+            db.query(InfoObjectAttachment)
+            .filter(InfoObjectAttachment.media_file_id == media_file_id)
+            .count()
+        )
+
+        if remaining_links == 0:
+            media_file = db.query(MediaFile).filter(MediaFile.id == media_file_id).first()
+            if media_file is not None:
+                file_path = Path(media_file.file_path)
+                if file_path.exists():
+                    file_path.unlink()
+                db.delete(media_file)
+
+
     db.delete(info_object)
     db.commit()
+
 
 @router.get("/info-objects/{info_object_id}/status", response_model=DeletionRequestStatusResponse)
 async def get_deletion_request_status(
