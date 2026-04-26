@@ -1,5 +1,4 @@
 from datetime import datetime
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -8,9 +7,8 @@ from sqlalchemy.orm import Session
 from app.auth import CurrentUser, get_current_user, require_admin
 from app.database import get_db
 from app.models.info_object import InfoObject
-from app.models.info_object_attachment import InfoObjectAttachment
 from app.models.info_object_deletion_request import InfoObjectDeletionRequest
-from app.models.media_file import MediaFile
+from app.services.info_object_service import InfoObjectService
 
 
 router = APIRouter(prefix="/deletion-requests", tags=["Запросы на удаление"])
@@ -62,7 +60,7 @@ async def create_deletion_request(
     if info_object is None:
         raise HTTPException(status_code=404, detail="InfoObject not found")
 
-    if not current_user.is_admin() and info_object.created_by != current_user.id:
+    if current_user.role != "ROLE_ADMIN" and info_object.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="Можно запрашивать удаление только своих ИО.")
 
     existing = (
@@ -116,76 +114,19 @@ async def approve_delete_request(
     if item is None:
         raise HTTPException(status_code=404, detail="Deletion request not found")
 
-    info_object = (
-        db.query(InfoObject)
-        .filter(InfoObject.id == item.info_object_id)
-        .first()
+    service = InfoObjectService(db)
+    deleted = service.mark_deleted(
+        item.info_object_id,
+        reason=item.reason,
+        deleted_by=current_admin.id,
+        replacement_info_object_id=item.replacement_info_object_id,
     )
-    if info_object is None:
+    if deleted is None:
         raise HTTPException(status_code=404, detail="InfoObject not found")
 
-    info_object_id = info_object.id
-
-
-    (
-        db.query(InfoObject)
-        .filter(InfoObject.replacement_info_object_id == info_object_id)
-        .update(
-            {InfoObject.replacement_info_object_id: None},
-            synchronize_session=False,
-        )
-    )
-
-
-    (
-        db.query(InfoObjectDeletionRequest)
-        .filter(InfoObjectDeletionRequest.replacement_info_object_id == info_object_id)
-        .update(
-            {InfoObjectDeletionRequest.replacement_info_object_id: None},
-            synchronize_session=False,
-        )
-    )
-
-
-    attachment_rows = (
-        db.query(InfoObjectAttachment)
-        .filter(InfoObjectAttachment.info_object_id == info_object_id)
-        .all()
-    )
-    media_file_ids = [row.media_file_id for row in attachment_rows]
-
-
-    (
-        db.query(InfoObjectAttachment)
-        .filter(InfoObjectAttachment.info_object_id == info_object_id)
-        .delete(synchronize_session=False)
-    )
-
-
-    (
-        db.query(InfoObjectDeletionRequest)
-        .filter(InfoObjectDeletionRequest.info_object_id == info_object_id)
-        .delete(synchronize_session=False)
-    )
-
-  
-    for media_file_id in media_file_ids:
-        remaining_links = (
-            db.query(InfoObjectAttachment)
-            .filter(InfoObjectAttachment.media_file_id == media_file_id)
-            .count()
-        )
-
-        if remaining_links == 0:
-            media_file = db.query(MediaFile).filter(MediaFile.id == media_file_id).first()
-            if media_file is not None:
-                file_path = Path(media_file.file_path)
-                if file_path.exists():
-                    file_path.unlink()
-                db.delete(media_file)
-
-
-    db.delete(info_object)
+    item.status = "approved"
+    item.reviewed_by = current_admin.id
+    item.reviewed_at = datetime.utcnow()
     db.commit()
 
 
@@ -199,7 +140,7 @@ async def get_deletion_request_status(
     if info_object is None:
         raise HTTPException(status_code=404, detail="InfoObject not found")
 
-    if not current_user.is_admin() and info_object.created_by != current_user.id:
+    if current_user.role != "ROLE_ADMIN" and info_object.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
 
     item = (

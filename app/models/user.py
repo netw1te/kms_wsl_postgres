@@ -11,3 +11,5 @@ class User(Base):
     full_name = Column(String(255), nullable=True)
     email = Column(String(255), nullable=True)
     role = Column(String(50), nullable=False, default='ROLE_USER')
+    def is_admin(self) -> bool:
+        return self.role == "ROLE_ADMIN"
