@@ -59,6 +59,7 @@ class InfoObject(Base):
     deletion_flag = Column(Boolean, default=False, nullable=False)
     deletion_reason = Column(String(500))
     deleted_by = Column(Integer, nullable=True)
+    deleted_at = Column(DateTime, nullable=True)
 
     replacement_info_object_id = Column(
         Integer,

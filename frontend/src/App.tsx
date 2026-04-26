@@ -27,12 +27,16 @@ type MediaFile = {
 }
 
 const defaultFilters: SearchFilters = {
+  search_everywhere: '',
   title: '',
   text: '',
   author: '',
   source: '',
   publication_title: '',
+  url: '',
   doi: '',
+  publication_date_from_raw: '',
+  publication_date_to_raw: '',
   tags: '',
 }
 
@@ -233,7 +237,7 @@ export default function App() {
       selectedFiles: [],
     },
   ])
-
+  const [deletedInfoObjects, setDeletedInfoObjects] = useState<InfoObjectPage | null>(null)
   const [agreement, setAgreement] = useState<AgreementStatus | null>(null)
   const [agreementForm, setAgreementForm] = useState({
     full_name: '',
@@ -318,6 +322,11 @@ export default function App() {
         if (me.role.includes('ROLE_ADMIN')) {
           deletionList = await apiFetch<DeletionRequestRecord[]>('/deletion-requests', credentials)
         }
+        let deletedList: InfoObjectPage | null = null
+        if (me.role.includes('ROLE_ADMIN')) {
+          deletedList = await apiFetch<InfoObjectPage>('/info-objects/deleted?page=0&size=20', credentials)
+        }
+        setDeletedInfoObjects(deletedList)
         setInfoObjects(allInfo)
         setMyInfoObjects(mine)
         setSearchQueries(queries)
@@ -504,6 +513,7 @@ export default function App() {
       const params = new URLSearchParams()
       Object.entries(filters).forEach(([key, value]) => {
         if (!value.trim()) return
+
         if (key === 'tags') {
           parseTags(value).forEach((tag) => params.append('tags', tag))
         } else {
@@ -609,6 +619,43 @@ export default function App() {
       await loadDashboard()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось удалить ИО по запросу')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleRestoreDeletedInfoObject(infoObjectId: number) {
+   if (!credentials) return
+
+    setLoading(true)
+    setError(null)
+    try {
+      await apiFetch<InfoObject>(`/info-objects/${infoObjectId}/restore`, credentials, {
+        method: 'PATCH',
+      })
+      await loadDashboard()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось восстановить ИО')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleHardDeleteInfoObject(infoObjectId: number) {
+    if (!credentials) return
+
+    const ok = window.confirm('Удалить объект навсегда? Это действие необратимо.')
+    if (!ok) return
+
+    setLoading(true)
+    setError(null)
+    try {
+      await apiFetch<void>(`/info-objects/${infoObjectId}/hard-delete`, credentials, {
+        method: 'DELETE',
+      })
+      await loadDashboard()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось удалить ИО навсегда')
     } finally {
       setLoading(false)
     }
@@ -847,12 +894,16 @@ export default function App() {
 
   async function handleApplySavedQuery(query: SearchQuery) {
     setFilters({
+      search_everywhere: query.search_everywhere ?? '',
       title: query.title ?? '',
       text: query.text ?? '',
       author: query.author ?? '',
       source: query.source ?? '',
       publication_title: query.publication_title ?? '',
+      url: query.url ?? '',
       doi: query.doi ?? '',
+      publication_date_from_raw: query.created_after_raw ?? '',
+      publication_date_to_raw: query.created_before_raw ?? '',
       tags: (query.tags ?? []).join(', '),
     })
     await handleSearchFromQuery(query)
@@ -1323,6 +1374,12 @@ async function handleReplaceTag() {
             </button>
           )}
 
+          {isAdmin && (
+            <button className={`tab ${activeTab === 'deleted-objects' ? 'active' : ''}`} onClick={() => navigateToTab('deleted-objects')}>
+              Удалённые объекты
+            </button>
+          )}
+
           <button className={`tab ${activeTab === 'detail' ? 'active' : ''}`} onClick={() => navigateToTab('detail')}>
             Карточка и файлы
           </button>
@@ -1355,6 +1412,10 @@ async function handleReplaceTag() {
               <input className="input" placeholder="Источник" value={filters.source} onChange={(e) => setFilters((s) => ({ ...s, source: e.target.value }))} />
               <input className="input" placeholder="Название публикации" value={filters.publication_title} onChange={(e) => setFilters((s) => ({ ...s, publication_title: e.target.value }))} />
               <input className="input" placeholder="DOI" value={filters.doi} onChange={(e) => setFilters((s) => ({ ...s, doi: e.target.value }))} />
+              <input className="input" placeholder="Искать везде" value={filters.search_everywhere} onChange={(e) => setFilters((s) => ({ ...s, search_everywhere: e.target.value }))} />
+<input className="input" placeholder="URL" value={filters.url} onChange={(e) => setFilters((s) => ({ ...s, url: e.target.value }))} />
+<input className="input" placeholder="Дата от" value={filters.publication_date_from_raw} onChange={(e) => setFilters((s) => ({ ...s, publication_date_from_raw: e.target.value }))} />
+<input className="input" placeholder="Дата до" value={filters.publication_date_to_raw} onChange={(e) => setFilters((s) => ({ ...s, publication_date_to_raw: e.target.value }))} />
             </div>
 
             <div style={{ marginTop: 16 }}>
@@ -1771,6 +1832,64 @@ async function handleReplaceTag() {
             </div>
           </div>
         )}
+        {activeTab === 'deleted-objects' && isAdmin && (
+        <div className="card">
+          <h2 className="section-title">Удалённые объекты</h2>
+
+          <div className="muted" style={{ marginBottom: 16 }}>
+            Объекты в этом разделе автоматически удаляются безвозвратно через 7 дней после удаления.
+          </div>
+
+          {deletedInfoObjects?.items?.length ? (
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Заголовок</th>
+                  <th>Автор</th>
+                  <th>Причина</th>
+                  <th>Дата удаления</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody>
+                {deletedInfoObjects.items.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.id}</td>
+                    <td>{item.title || `ИО #${item.id}`}</td>
+                    <td>{item.author || '—'}</td>
+                    <td>{item.deletion_reason || '—'}</td>
+                    <td>{item.deleted_at || '—'}</td>
+                    <td>
+                      <div className="row">
+                        <button
+                          className="btn secondary"
+                          type="button"
+                          onClick={() => void handleRestoreDeletedInfoObject(item.id)}
+                          disabled={loading}
+                        >
+                          Восстановить
+                        </button>
+
+                        <button
+                          className="btn danger"
+                          type="button"
+                          onClick={() => void handleHardDeleteInfoObject(item.id)}
+                          disabled={loading}
+                        >
+                          Удалить навсегда
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="muted">Удалённых объектов нет.</div>
+          )}
+        </div>
+      )}
         {activeTab === 'detail' && (
           <>
             <div className="card">

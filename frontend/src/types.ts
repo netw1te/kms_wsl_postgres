@@ -16,7 +16,12 @@ export type InfoObject = {
   publication_date_to_raw?: string | null
   tags?: string[]
   created_by?: number | null
+
   deletion_flag?: boolean
+  deletion_reason?: string | null
+  deleted_by?: number | null
+  deleted_at?: string | null
+  replacement_info_object_id?: number | null
 }
 
 export type InfoObjectPage = {
@@ -30,13 +35,24 @@ export type InfoObjectPage = {
 export type SearchQuery = {
   id: number
   name: string
+  created_at: string
+
+  search_everywhere?: string | null
   title?: string | null
   text?: string | null
-  author?: string | null
   source?: string | null
+  author?: string | null
   publication_title?: string | null
+  url?: string | null
   doi?: string | null
+
   tags?: string[]
+  tag_mode?: string | null
+
+  created_after_raw?: string | null
+  created_before_raw?: string | null
+
+  info_object_id?: number | null
   user_id: number
 }
 
@@ -46,12 +62,16 @@ export type SearchQueryList = {
 }
 
 export type SearchFilters = {
+  search_everywhere: string
   title: string
   text: string
   author: string
   source: string
   publication_title: string
+  url: string
   doi: string
+  publication_date_from_raw: string
+  publication_date_to_raw: string
   tags: string
 }
 

@@ -1,8 +1,13 @@
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
 from app.models.info_object import InfoObject, Tag
+from app.models.info_object_attachment import InfoObjectAttachment
+from app.models.info_object_deletion_request import InfoObjectDeletionRequest
+from app.models.media_file import MediaFile
 from app.repositories.info_object_repository import InfoObjectRepository
 
 
@@ -11,8 +16,35 @@ class InfoObjectService:
         self.db = db
         self.repository = InfoObjectRepository(db)
 
-    def find_all(self, page: int = 0, size: int = 20, sort: str = "id", direction: str = "asc"):
-        return self.repository.find_all_paginated(page=page, size=size, sort=sort, direction=direction)
+    def find_all(
+        self,
+        page: int = 0,
+        size: int = 20,
+        sort: str = "id",
+        direction: str = "asc",
+        include_deleted: bool = False,
+    ):
+        return self.repository.find_all_paginated(
+            page=page,
+            size=size,
+            sort=sort,
+            direction=direction,
+            include_deleted=include_deleted,
+        )
+
+    def find_deleted(
+        self,
+        page: int = 0,
+        size: int = 20,
+        sort: str = "deleted_at",
+        direction: str = "desc",
+    ):
+        return self.repository.find_deleted_paginated(
+            page=page,
+            size=size,
+            sort=sort,
+            direction=direction,
+        )
 
     def find_my(
         self,
@@ -21,7 +53,7 @@ class InfoObjectService:
         size: int = 20,
         sort: str = "id",
         direction: str = "asc",
-        include_deleted: bool = True,
+        include_deleted: bool = False,
     ):
         return self.repository.find_my_paginated(
             user_id=user_id,
@@ -62,14 +94,18 @@ class InfoObjectService:
     def search(
         self,
         *,
+        search_everywhere=None,
         title=None,
         text=None,
         author=None,
         source=None,
         publication_title=None,
+        url=None,
         doi=None,
         tags=None,
         tag_mode="AND",
+        publication_date_from=None,
+        publication_date_to=None,
         include_deleted=False,
         page=0,
         size=20,
@@ -88,14 +124,18 @@ class InfoObjectService:
                 )
 
         return self.repository.search(
+            search_everywhere=search_everywhere,
             title=title,
             text=text,
             author=author,
             source=source,
             publication_title=publication_title,
+            url=url,
             doi=doi,
             tags=tags,
             tag_mode=tag_mode,
+            publication_date_from=publication_date_from,
+            publication_date_to=publication_date_to,
             include_deleted=include_deleted,
             page=page,
             size=size,
@@ -111,5 +151,93 @@ class InfoObjectService:
         info_object.deletion_flag = False
         info_object.deletion_reason = None
         info_object.deleted_by = None
+        info_object.deleted_at = None
         info_object.replacement_info_object_id = None
         return self.repository.save(info_object)
+
+    def mark_deleted(
+        self,
+        info_object_id: int,
+        *,
+        reason: str | None,
+        deleted_by: int | None,
+        replacement_info_object_id: int | None = None,
+    ) -> Optional[InfoObject]:
+        info_object = self.repository.find_by_id(info_object_id)
+        if info_object is None:
+            return None
+
+        info_object.deletion_flag = True
+        info_object.deletion_reason = reason
+        info_object.deleted_by = deleted_by
+        info_object.deleted_at = datetime.utcnow()
+        info_object.replacement_info_object_id = replacement_info_object_id
+        return self.repository.save(info_object)
+
+    def hard_delete_info_object(self, info_object_id: int) -> bool:
+        info_object = self.repository.find_by_id(info_object_id)
+        if info_object is None:
+            return False
+
+        (
+            self.db.query(InfoObject)
+            .filter(InfoObject.replacement_info_object_id == info_object_id)
+            .update({InfoObject.replacement_info_object_id: None}, synchronize_session=False)
+        )
+
+        (
+            self.db.query(InfoObjectDeletionRequest)
+            .filter(InfoObjectDeletionRequest.replacement_info_object_id == info_object_id)
+            .update(
+                {InfoObjectDeletionRequest.replacement_info_object_id: None},
+                synchronize_session=False,
+            )
+        )
+
+        attachment_rows = (
+            self.db.query(InfoObjectAttachment)
+            .filter(InfoObjectAttachment.info_object_id == info_object_id)
+            .all()
+        )
+        media_file_ids = [row.media_file_id for row in attachment_rows]
+
+        (
+            self.db.query(InfoObjectAttachment)
+            .filter(InfoObjectAttachment.info_object_id == info_object_id)
+            .delete(synchronize_session=False)
+        )
+
+        (
+            self.db.query(InfoObjectDeletionRequest)
+            .filter(InfoObjectDeletionRequest.info_object_id == info_object_id)
+            .delete(synchronize_session=False)
+        )
+
+        for media_file_id in media_file_ids:
+            remaining_links = (
+                self.db.query(InfoObjectAttachment)
+                .filter(InfoObjectAttachment.media_file_id == media_file_id)
+                .count()
+            )
+            if remaining_links == 0:
+                media_file = self.db.query(MediaFile).filter(MediaFile.id == media_file_id).first()
+                if media_file:
+                    file_path = Path(media_file.file_path)
+                    if file_path.exists():
+                        file_path.unlink()
+                    self.db.delete(media_file)
+
+        self.db.delete(info_object)
+        self.db.commit()
+        return True
+
+    def purge_deleted_older_than(self, days: int = 7) -> int:
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        expired = self.repository.find_deleted_older_than(cutoff)
+        deleted_count = 0
+
+        for item in expired:
+            if self.hard_delete_info_object(item.id):
+                deleted_count += 1
+
+        return deleted_count

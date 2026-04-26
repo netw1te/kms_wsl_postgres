@@ -47,7 +47,7 @@ async def list_info_object_files(
     items = service.list_for_info_object(
         info_object_id=info_object_id,
         current_user_id=current_user.id,
-        is_admin=current_user.is_admin(),
+        is_admin=current_user.role == "ROLE_ADMIN",
     )
     return [to_response(item) for item in items]
 
@@ -68,7 +68,7 @@ async def upload_files_to_info_object(
         info_object_id=info_object_id,
         files=files,
         current_user_id=current_user.id,
-        is_admin=current_user.is_admin(),
+        is_admin=current_user.role == "ROLE_ADMIN",
     )
     return [to_response(item) for item in items]
 
@@ -85,7 +85,7 @@ async def download_file(
         info_object_id=info_object_id,
         file_id=file_id,
         current_user_id=current_user.id,
-        is_admin=current_user.is_admin(),
+        is_admin=current_user.role == "ROLE_ADMIN"
     )
 
     return FileResponse(
@@ -107,5 +107,5 @@ async def detach_file_from_info_object(
         info_object_id=info_object_id,
         file_id=file_id,
         current_user_id=current_user.id,
-        is_admin=current_user.is_admin(),
+        is_admin=current_user.role == "ROLE_ADMIN",
     )

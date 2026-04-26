@@ -5,7 +5,7 @@ from app.models.info_object import InfoObject
 
 
 def ensure_can_modify_info_object(current_user: CurrentUser, info_object: InfoObject) -> None:
-    if current_user.is_admin():
+    if current_user.role == "ROLE_ADMIN":
         return
 
     if info_object.created_by != current_user.id:

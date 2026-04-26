@@ -26,7 +26,7 @@ class TagSearchResponse(BaseModel):
 
 
 def ensure_scope_allowed(scope: str, current_user: CurrentUser):
-    if scope == "all" and not current_user.is_admin():
+    if scope == "all" and current_user.role != "ROLE_ADMIN":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Изменение меток для всех ИО доступно только администратору.",
