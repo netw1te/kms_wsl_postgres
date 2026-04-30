@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+from sqlalchemy import asc, desc, or_
 from sqlalchemy.orm import Session
 
 from app.models.info_object import InfoObject, Tag
@@ -16,6 +17,36 @@ class InfoObjectService:
         self.db = db
         self.repository = InfoObjectRepository(db)
 
+    def _active_filter(self):
+        return or_(
+            InfoObject.deletion_flag.is_(False),
+            InfoObject.deletion_flag.is_(None),
+        )
+
+    def _paginate(self, query, page: int, size: int, sort: str, direction: str):
+        sort_column = getattr(InfoObject, sort, InfoObject.id)
+
+        total = query.count()
+
+        if direction.lower() == "desc":
+            query = query.order_by(desc(sort_column))
+        else:
+            query = query.order_by(asc(sort_column))
+
+        items = query.offset(page * size).limit(size).all()
+
+        pages = 0
+        if total > 0:
+            pages = (total + size - 1) // size
+
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "size": size,
+            "pages": pages,
+        }
+
     def find_all(
         self,
         page: int = 0,
@@ -24,12 +55,17 @@ class InfoObjectService:
         direction: str = "asc",
         include_deleted: bool = False,
     ):
-        return self.repository.find_all_paginated(
+        query = self.db.query(InfoObject)
+
+        if not include_deleted:
+            query = query.filter(self._active_filter())
+
+        return self._paginate(
+            query=query,
             page=page,
             size=size,
             sort=sort,
             direction=direction,
-            include_deleted=include_deleted,
         )
 
     def find_deleted(
@@ -39,7 +75,12 @@ class InfoObjectService:
         sort: str = "deleted_at",
         direction: str = "desc",
     ):
-        return self.repository.find_deleted_paginated(
+        query = self.db.query(InfoObject).filter(
+            InfoObject.deletion_flag.is_(True)
+        )
+
+        return self._paginate(
+            query=query,
             page=page,
             size=size,
             sort=sort,
@@ -55,13 +96,19 @@ class InfoObjectService:
         direction: str = "asc",
         include_deleted: bool = False,
     ):
-        return self.repository.find_my_paginated(
-            user_id=user_id,
+        query = self.db.query(InfoObject).filter(
+            InfoObject.created_by == user_id
+        )
+
+        if not include_deleted:
+            query = query.filter(self._active_filter())
+
+        return self._paginate(
+            query=query,
             page=page,
             size=size,
             sort=sort,
             direction=direction,
-            include_deleted=include_deleted,
         )
 
     def find_by_id(self, info_object_id: int) -> Optional[InfoObject]:
@@ -78,17 +125,22 @@ class InfoObjectService:
 
     def get_or_create_tags(self, tag_names: list[str]) -> list[Tag]:
         result = []
+
         for tag_name in tag_names:
             clean_name = tag_name.strip()
+
             if not clean_name:
                 continue
 
             tag = self.db.query(Tag).filter(Tag.name == clean_name).first()
+
             if tag is None:
                 tag = Tag(name=clean_name)
                 self.db.add(tag)
                 self.db.flush()
+
             result.append(tag)
+
         return result
 
     def search(
@@ -114,29 +166,81 @@ class InfoObjectService:
     ):
         if tags:
             existing_tags = {
-                row[0] for row in self.db.query(Tag.name).filter(Tag.name.in_(tags)).all()
+                row[0]
+                for row in self.db.query(Tag.name).filter(Tag.name.in_(tags)).all()
             }
+
             missing_tags = [tag for tag in tags if tag not in existing_tags]
+
             if missing_tags:
                 missing_text = ", ".join(missing_tags)
                 raise ValueError(
-                    f"Таких меток нет: {missing_text}. Удалите их из поиска или вернитесь к форме поиска."
+                    f"Таких меток нет: {missing_text}. "
+                    f"Удалите их из поиска или вернитесь к форме поиска."
                 )
 
-        return self.repository.search(
-            search_everywhere=search_everywhere,
-            title=title,
-            text=text,
-            author=author,
-            source=source,
-            publication_title=publication_title,
-            url=url,
-            doi=doi,
-            tags=tags,
-            tag_mode=tag_mode,
-            publication_date_from=publication_date_from,
-            publication_date_to=publication_date_to,
-            include_deleted=include_deleted,
+        query = self.db.query(InfoObject)
+
+        if not include_deleted:
+            query = query.filter(self._active_filter())
+
+        if search_everywhere:
+            pattern = f"%{search_everywhere.strip()}%"
+            query = query.filter(
+                or_(
+                    InfoObject.title.ilike(pattern),
+                    InfoObject.content.ilike(pattern),
+                    InfoObject.author.ilike(pattern),
+                    InfoObject.source.ilike(pattern),
+                    InfoObject.publication_title.ilike(pattern),
+                    InfoObject.url.ilike(pattern),
+                    InfoObject.doi.ilike(pattern),
+                    InfoObject.tags.any(Tag.name.ilike(pattern)),
+                )
+            )
+
+        if title:
+            query = query.filter(InfoObject.title.ilike(f"%{title.strip()}%"))
+
+        if text:
+            query = query.filter(InfoObject.content.ilike(f"%{text.strip()}%"))
+
+        if author:
+            query = query.filter(InfoObject.author.ilike(f"%{author.strip()}%"))
+
+        if source:
+            query = query.filter(InfoObject.source.ilike(f"%{source.strip()}%"))
+
+        if publication_title:
+            query = query.filter(
+                InfoObject.publication_title.ilike(f"%{publication_title.strip()}%")
+            )
+
+        if url:
+            query = query.filter(InfoObject.url.ilike(f"%{url.strip()}%"))
+
+        if doi:
+            query = query.filter(InfoObject.doi.ilike(f"%{doi.strip()}%"))
+
+        if publication_date_from:
+            query = query.filter(
+                InfoObject.publication_date_from >= publication_date_from
+            )
+
+        if publication_date_to:
+            query = query.filter(
+                InfoObject.publication_date_to <= publication_date_to
+            )
+
+        if tags:
+            if tag_mode == "AND":
+                for tag in tags:
+                    query = query.filter(InfoObject.tags.any(Tag.name == tag))
+            else:
+                query = query.filter(InfoObject.tags.any(Tag.name.in_(tags)))
+
+        return self._paginate(
+            query=query,
             page=page,
             size=size,
             sort=sort,
@@ -145,6 +249,7 @@ class InfoObjectService:
 
     def restore_info_object(self, info_object_id: int) -> Optional[InfoObject]:
         info_object = self.repository.find_by_id(info_object_id)
+
         if info_object is None:
             return None
 
@@ -153,6 +258,7 @@ class InfoObjectService:
         info_object.deleted_by = None
         info_object.deleted_at = None
         info_object.replacement_info_object_id = None
+
         return self.repository.save(info_object)
 
     def mark_deleted(
@@ -164,6 +270,7 @@ class InfoObjectService:
         replacement_info_object_id: int | None = None,
     ) -> Optional[InfoObject]:
         info_object = self.repository.find_by_id(info_object_id)
+
         if info_object is None:
             return None
 
@@ -172,22 +279,30 @@ class InfoObjectService:
         info_object.deleted_by = deleted_by
         info_object.deleted_at = datetime.utcnow()
         info_object.replacement_info_object_id = replacement_info_object_id
+
         return self.repository.save(info_object)
 
     def hard_delete_info_object(self, info_object_id: int) -> bool:
         info_object = self.repository.find_by_id(info_object_id)
+
         if info_object is None:
             return False
 
         (
             self.db.query(InfoObject)
             .filter(InfoObject.replacement_info_object_id == info_object_id)
-            .update({InfoObject.replacement_info_object_id: None}, synchronize_session=False)
+            .update(
+                {InfoObject.replacement_info_object_id: None},
+                synchronize_session=False,
+            )
         )
 
         (
             self.db.query(InfoObjectDeletionRequest)
-            .filter(InfoObjectDeletionRequest.replacement_info_object_id == info_object_id)
+            .filter(
+                InfoObjectDeletionRequest.replacement_info_object_id
+                == info_object_id
+            )
             .update(
                 {InfoObjectDeletionRequest.replacement_info_object_id: None},
                 synchronize_session=False,
@@ -199,6 +314,7 @@ class InfoObjectService:
             .filter(InfoObjectAttachment.info_object_id == info_object_id)
             .all()
         )
+
         media_file_ids = [row.media_file_id for row in attachment_rows]
 
         (
@@ -219,16 +335,25 @@ class InfoObjectService:
                 .filter(InfoObjectAttachment.media_file_id == media_file_id)
                 .count()
             )
+
             if remaining_links == 0:
-                media_file = self.db.query(MediaFile).filter(MediaFile.id == media_file_id).first()
+                media_file = (
+                    self.db.query(MediaFile)
+                    .filter(MediaFile.id == media_file_id)
+                    .first()
+                )
+
                 if media_file:
                     file_path = Path(media_file.file_path)
+
                     if file_path.exists():
                         file_path.unlink()
+
                     self.db.delete(media_file)
 
         self.db.delete(info_object)
         self.db.commit()
+
         return True
 
     def purge_deleted_older_than(self, days: int = 7) -> int:
