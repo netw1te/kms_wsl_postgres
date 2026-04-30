@@ -290,6 +290,31 @@ export default function App() {
   const isAuthenticated = !!credentials
   const hasFilters = useMemo(() => Object.values(filters).some(Boolean), [filters])
   const isAdmin = !!currentUser?.role?.includes('ROLE_ADMIN')
+  const deletionState = getInfoObjectDeletionState(selectedInfoObject)
+
+ const isDeletedForUi =
+  !!selectedInfoObject &&
+  (selectedInfoObject.deletion_flag ||
+    selectedDeletionRequest?.status === 'approved')
+
+  const canRequestDeletion =
+    !!selectedInfoObject &&
+    !loading &&
+    !isDeletedForUi &&
+    !(selectedDeletionRequest?.exists && selectedDeletionRequest.status === 'pending')
+
+  const canRestoreDeleted =
+    !!selectedInfoObject &&
+    isDeletedForUi &&
+    isAdmin &&
+    !loading
+
+  const canHardDelete =
+    !!selectedInfoObject &&
+    isDeletedForUi &&
+    isAdmin &&
+    !loading
+
   const canGoBack = historyIndex > 0
   const canGoForward = historyIndex < historyStack.length - 1
   useEffect(() => {
@@ -345,6 +370,46 @@ export default function App() {
     if (!credentials) return
     const files = await apiFetch<MediaFile[]>(`/files/info-objects/${infoObjectId}`, credentials)
     setSelectedFiles(files)
+  }
+
+  function getInfoObjectDeletionState(infoObject: InfoObject | null) {
+    if (!infoObject) {
+      return {
+        code: 'normal',
+        label: 'Активный',
+        tone: 'normal',
+      } as const
+    }
+
+    if (infoObject.deletion_flag) {
+      return {
+        code: 'deleted',
+        label: 'Удалён',
+        tone: 'deleted',
+      } as const
+    }
+
+    if (selectedDeletionRequest?.exists && selectedDeletionRequest.status === 'pending') {
+      return {
+        code: 'pending',
+        label: 'Запрошено удаление',
+        tone: 'pending',
+      } as const
+    }
+
+    if (selectedDeletionRequest?.exists && selectedDeletionRequest.status === 'approved') {
+      return {
+        code: 'approved',
+        label: 'Удаление подтверждено',
+        tone: 'deleted',
+      } as const
+    }
+
+    return {
+      code: 'normal',
+      label: 'Активный',
+      tone: 'normal',
+    } as const
   }
 
   function fillEditForm(item: InfoObject) {
@@ -484,6 +549,14 @@ export default function App() {
       return ''
     })
   }
+
+  function clearSelectedInfoObject() {
+    setSelectedInfoObject(null)
+    setSelectedFiles([])
+    setSelectedDeletionRequest(null)
+    setUploadFiles(null)
+  }
+
   async function loadCaptchaImage() {
     const url = await getCaptcha()
     setCaptchaUrl((prev) => {
@@ -567,6 +640,37 @@ export default function App() {
     }
   }
 
+  async function handleOpenDeletedInfoObject(item: InfoObject) {
+    if (!credentials) return
+
+    setLoading(true)
+    setError(null)
+    try {
+      setSelectedInfoObject(item)
+      fillEditForm(item)
+
+      setSelectedDeletionRequest({
+        exists: true,
+        id: null,
+        status: 'approved',
+        reason: item.deletion_reason ?? null,
+        replacement_info_object_id: item.replacement_info_object_id ?? null,
+      })
+
+      const files = await apiFetch<MediaFile[]>(
+        `/files/info-objects/${item.id}`,
+        credentials
+      )
+      setSelectedFiles(files)
+
+      navigateToTab('detail')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось открыть карточку удалённого ИО')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   async function handleLoginWithCaptcha(e: React.FormEvent) {
     e.preventDefault()
 
@@ -607,16 +711,80 @@ export default function App() {
       setLoading(false)
     }
   }
-  async function handleApproveDeletionRequest(requestId: number) {
+  async function handleApproveDeletionRequest(request: DeletionRequestRecord) {
     if (!credentials) return
 
     setLoading(true)
     setError(null)
     try {
-      await apiFetch<void>(`/deletion-requests/${requestId}/approve-delete`, credentials, {
-        method: 'POST',
+      await apiFetch<void>(
+        `/deletion-requests/${request.id}/approve-delete`,
+        credentials,
+        {
+          method: 'POST',
+        }
+      )
+
+      setDeletionRequests((prev) =>
+        prev.map((item) =>
+          item.id === request.id
+            ? {
+                ...item,
+                status: 'approved',
+              }
+            : item
+        )
+      )
+
+      setSelectedDeletionRequest({
+        exists: true,
+        id: request.id,
+        status: 'approved',
+        reason: request.reason ?? null,
+        replacement_info_object_id: request.replacement_info_object_id ?? null,
       })
-      await loadDashboard()
+
+      setSelectedInfoObject((prev) => {
+        if (!prev || prev.id !== request.info_object_id) return prev
+
+        return {
+          ...prev,
+          deletion_flag: true,
+          deletion_reason: request.reason ?? null,
+          replacement_info_object_id: request.replacement_info_object_id ?? null,
+          deleted_at: new Date().toISOString(),
+        }
+      })
+
+      setInfoObjects((prev) => {
+        if (!prev) return prev
+
+        return {
+          ...prev,
+          items: prev.items.filter((item) => item.id !== request.info_object_id),
+          total: Math.max(0, prev.total - 1),
+        }
+      })
+
+      setMyInfoObjects((prev) => {
+        if (!prev) return prev
+
+        return {
+          ...prev,
+          items: prev.items.filter((item) => item.id !== request.info_object_id),
+          total: Math.max(0, prev.total - 1),
+        }
+      })
+
+      const deletedList = await apiFetch<InfoObjectPage>(
+        '/info-objects/deleted?page=0&size=20',
+        credentials
+      )
+      setDeletedInfoObjects(deletedList)
+
+      if (selectedInfoObject?.id === request.info_object_id) {
+        navigateToTab('detail')
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось удалить ИО по запросу')
     } finally {
@@ -625,14 +793,39 @@ export default function App() {
   }
 
   async function handleRestoreDeletedInfoObject(infoObjectId: number) {
-   if (!credentials) return
+    if (!credentials) return
 
     setLoading(true)
     setError(null)
     try {
-      await apiFetch<InfoObject>(`/info-objects/${infoObjectId}/restore`, credentials, {
-        method: 'PATCH',
+      const restored = await apiFetch<InfoObject>(
+        `/info-objects/${infoObjectId}/restore`,
+        credentials,
+        {
+          method: 'PATCH',
+        }
+      )
+
+      setSelectedDeletionRequest(null)
+
+      setSelectedInfoObject((prev) => {
+        if (!prev || prev.id !== infoObjectId) return prev
+
+        return {
+          ...prev,
+          ...restored,
+          deletion_flag: false,
+          deletion_reason: null,
+          replacement_info_object_id: null,
+          deleted_at: null,
+        }
       })
+
+      if (selectedInfoObject?.id === infoObjectId) {
+        fillEditForm(restored)
+        await loadDeletionRequestStatus(infoObjectId)
+      }
+
       await loadDashboard()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось восстановить ИО')
@@ -654,6 +847,17 @@ export default function App() {
         method: 'DELETE',
       })
       await loadDashboard()
+
+      if (selectedInfoObject?.id === infoObjectId) {
+        setSelectedInfoObject(null)
+        setSelectedFiles([])
+        setSelectedDeletionRequest(null)
+        pushViewState({
+          tab: 'deleted-objects',
+          selectedInfoObject: null,
+          selectedFiles: [],
+        })
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось удалить ИО навсегда')
     } finally {
@@ -1158,6 +1362,37 @@ async function handleReplaceTag() {
       setLoading(false)
     }
   }
+  async function handleOpenDeletionRequestCard(request: DeletionRequestRecord) {
+    if (!credentials) return
+
+    setLoading(true)
+    setError(null)
+    try {
+      const result = await apiFetch<InfoObject>(`/info-objects/${request.info_object_id}`, credentials)
+      setSelectedInfoObject(result)
+      fillEditForm(result)
+
+      const files = await apiFetch<MediaFile[]>(
+        `/files/info-objects/${request.info_object_id}`,
+        credentials
+      )
+      setSelectedFiles(files)
+
+      setSelectedDeletionRequest({
+        exists: true,
+        id: request.id,
+        status: request.status,
+        reason: request.reason ?? null,
+        replacement_info_object_id: request.replacement_info_object_id ?? null,
+      })
+
+      navigateToTab('detail')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось открыть карточку ИО')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   async function handleExportUser(login: string) {
     if (!credentials) return
@@ -1310,22 +1545,40 @@ async function handleReplaceTag() {
     <div className="page">
       <div className="container">
         <div className="card">
-          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+          <div
+            className="row"
+            style={{ justifyContent: 'space-between', alignItems: 'center' }}
+          >
             <div>
               <h1 style={{ margin: 0 }}>Система управления знаниями</h1>
               <div className="muted">Текущий пользователь: {credentials.login}</div>
             </div>
+
             <div className="row">
               <div className="row">
-                <button className="btn secondary" onClick={goBackInApp} disabled={!canGoBack}>
+                <button
+                  className="btn secondary"
+                  onClick={goBackInApp}
+                  disabled={!canGoBack}
+                >
                   Назад
                 </button>
-                <button className="btn secondary" onClick={goForwardInApp} disabled={!canGoForward}>
+
+                <button
+                  className="btn secondary"
+                  onClick={goForwardInApp}
+                  disabled={!canGoForward}
+                >
                   Вперёд
                 </button>
-                <button className="btn secondary" onClick={() => void loadDashboard()}>
+
+                <button
+                  className="btn secondary"
+                  onClick={() => void loadDashboard()}
+                >
                   Обновить
                 </button>
+
                 <button className="btn secondary" onClick={handleLogout}>
                   Выйти
                 </button>
@@ -1413,9 +1666,9 @@ async function handleReplaceTag() {
               <input className="input" placeholder="Название публикации" value={filters.publication_title} onChange={(e) => setFilters((s) => ({ ...s, publication_title: e.target.value }))} />
               <input className="input" placeholder="DOI" value={filters.doi} onChange={(e) => setFilters((s) => ({ ...s, doi: e.target.value }))} />
               <input className="input" placeholder="Искать везде" value={filters.search_everywhere} onChange={(e) => setFilters((s) => ({ ...s, search_everywhere: e.target.value }))} />
-<input className="input" placeholder="URL" value={filters.url} onChange={(e) => setFilters((s) => ({ ...s, url: e.target.value }))} />
-<input className="input" placeholder="Дата от" value={filters.publication_date_from_raw} onChange={(e) => setFilters((s) => ({ ...s, publication_date_from_raw: e.target.value }))} />
-<input className="input" placeholder="Дата до" value={filters.publication_date_to_raw} onChange={(e) => setFilters((s) => ({ ...s, publication_date_to_raw: e.target.value }))} />
+              <input className="input" placeholder="URL" value={filters.url} onChange={(e) => setFilters((s) => ({ ...s, url: e.target.value }))} />
+              <input className="input" placeholder="Дата от" value={filters.publication_date_from_raw} onChange={(e) => setFilters((s) => ({ ...s, publication_date_from_raw: e.target.value }))} />
+              <input className="input" placeholder="Дата до" value={filters.publication_date_to_raw} onChange={(e) => setFilters((s) => ({ ...s, publication_date_to_raw: e.target.value }))} />
             </div>
 
             <div style={{ marginTop: 16 }}>
@@ -1773,18 +2026,29 @@ async function handleReplaceTag() {
                       <td>{item.replacement_info_object_id || '—'}</td>
                       <td>{item.status}</td>
                       <td>
-                        {item.status === 'pending' ? (
+                        <div className="row">
                           <button
-                            className="btn danger"
-                            type="button"
-                            onClick={() => void handleApproveDeletionRequest(item.id)}
-                            disabled={loading}
-                          >
-                            Удалить ИО
-                          </button>
-                        ) : (
-                          <span className="muted">Обработано</span>
-                        )}
+                              className="btn secondary"
+                              type="button"
+                              onClick={() => void handleOpenDeletionRequestCard(item)}
+                              disabled={loading}
+                            >
+                              Открыть карточку
+                            </button>
+
+                            {item.status === 'pending' ? (
+                              <button
+                                className="btn danger"
+                                type="button"
+                                onClick={() => void handleApproveDeletionRequest(item)}
+                                disabled={loading}
+                              >
+                                Подтвердить удаление
+                              </button>
+                            ) : (
+                              <span className="muted">Обработано</span>
+                            )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -1833,214 +2097,359 @@ async function handleReplaceTag() {
           </div>
         )}
         {activeTab === 'deleted-objects' && isAdmin && (
-        <div className="card">
-          <h2 className="section-title">Удалённые объекты</h2>
+          <div className="card">
+            <h2 className="section-title">Удалённые объекты</h2>
 
-          <div className="muted" style={{ marginBottom: 16 }}>
-            Объекты в этом разделе автоматически удаляются безвозвратно через 7 дней после удаления.
-          </div>
-
-          {deletedInfoObjects?.items?.length ? (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Заголовок</th>
-                  <th>Автор</th>
-                  <th>Причина</th>
-                  <th>Дата удаления</th>
-                  <th>Действия</th>
-                </tr>
-              </thead>
-              <tbody>
-                {deletedInfoObjects.items.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.id}</td>
-                    <td>{item.title || `ИО #${item.id}`}</td>
-                    <td>{item.author || '—'}</td>
-                    <td>{item.deletion_reason || '—'}</td>
-                    <td>{item.deleted_at || '—'}</td>
-                    <td>
-                      <div className="row">
-                        <button
-                          className="btn secondary"
-                          type="button"
-                          onClick={() => void handleRestoreDeletedInfoObject(item.id)}
-                          disabled={loading}
-                        >
-                          Восстановить
-                        </button>
-
-                        <button
-                          className="btn danger"
-                          type="button"
-                          onClick={() => void handleHardDeleteInfoObject(item.id)}
-                          disabled={loading}
-                        >
-                          Удалить навсегда
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <div className="muted">Удалённых объектов нет.</div>
-          )}
-        </div>
-      )}
-        {activeTab === 'detail' && (
-          <>
-            <div className="card">
-              <h2 className="section-title">Карточка ИО</h2>
-              {selectedInfoObject ? (
-                <>
-                  <h3>{selectedInfoObject.title || `ИО #${selectedInfoObject.id}`}</h3>
-                  <div className="grid-2">
-                    <div><strong>Автор:</strong> {selectedInfoObject.author || '—'}</div>
-                    <div><strong>Источник:</strong> {selectedInfoObject.source || '—'}</div>
-                    <div><strong>DOI:</strong> {selectedInfoObject.doi || '—'}</div>
-                    <div><strong>Публикация:</strong> {selectedInfoObject.publication_title || '—'}</div>
-                    <div><strong>Дата от:</strong> {selectedInfoObject.publication_date_from_raw || '—'}</div>
-                    <div><strong>Дата до:</strong> {selectedInfoObject.publication_date_to_raw || '—'}</div>
-                    <div><strong>Создал:</strong> {selectedInfoObject.created_by || '—'}</div>
-                    <div>
-                    <strong>Статус:</strong>{' '}
-                      {selectedInfoObject.deletion_flag ? 'Помечен на удаление' : 'Активен'}
-                    </div>
-                    <div className="row" style={{ marginTop: 16 }}>
-                      <button
-                        className="btn secondary"
-                        type="button"
-                        onClick={() => void handleExportSelectedInfoObject()}
-                        disabled={loading}
-                      >
-                        Экспортировать объект
-                      </button>
-                    </div>
-                  </div>
-
-                  <div style={{ marginTop: 16 }}>
-                    <strong>Текст:</strong>
-                    <div className="card" style={{ background: '#f8fafc' }}>
-                      {selectedInfoObject.content || '—'}
-                    </div>
-                  </div>
-
-                  <div style={{ marginTop: 16 }}>
-                    {(selectedInfoObject.tags ?? []).map((tag) => (
-                      <span key={tag} className="badge" style={{ marginRight: 8 }}>{tag}</span>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <div className="muted">Выберите ИО из списка.</div>
-              )}
+            <div className="muted" style={{ marginBottom: 16 }}>
+              Объекты в этом разделе автоматически удаляются безвозвратно через 7 дней после удаления.
             </div>
 
-            {selectedInfoObject && (
-              <div className="grid-2">
-                <div className="card">
-                  <div className="card">
-                    <h2 className="section-title">Действия с объектом</h2>
+            {deletedInfoObjects?.items?.length ? (
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Заголовок</th>
+                    <th>Автор</th>
+                    <th>Причина</th>
+                    <th>Дата удаления</th>
+                    <th>Действия</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deletedInfoObjects.items.map((item) => (
+                    <tr key={item.id}>
+                      <td>{item.id}</td>
+                      <td>{item.title || `ИО #${item.id}`}</td>
+                      <td>{item.author || '—'}</td>
+                      <td>{item.deletion_reason || '—'}</td>
+                      <td>{item.deleted_at || '—'}</td>
+                      <td>
+                        <div className="row">
+                          <button
+                            className="btn secondary"
+                            type="button"
+                            onClick={() => void handleOpenDeletedInfoObject(item)}
+                            disabled={loading}
+                          >
+                            Открыть карточку
+                          </button>
 
-                    <div className="row">
-                      <button
-                        className="btn"
-                        type="button"
-                        onClick={handleCreateCopyFromSelected}
-                        disabled={loading}
-                      >
-                        Создать копию для редактирования
-                      </button>
+                          <button
+                            className="btn secondary"
+                            type="button"
+                            onClick={() => void handleRestoreDeletedInfoObject(item.id)}
+                            disabled={loading}
+                          >
+                            Восстановить
+                          </button>
 
-                      {selectedInfoObject.deletion_flag ? (
-                        <button className="btn secondary" type="button" disabled>
-                          Помечен на удаление
-                        </button>
-                      ) : (
-                        <button
-                          className="btn danger"
-                          type="button"
-                          onClick={() => void handleRequestDeletionInfoObject()}
-                          disabled={loading}
-                        >
-                          Запросить удаление
-                        </button>
-                      )}
-
-                      <button
-                        className="btn secondary"
-                        type="button"
-                        onClick={() => void handleRestoreInfoObject()}
-                        disabled={loading}
-                      >
-                        Восстановить
-                      </button>
-                    </div>
-
-                    <div className="muted" style={{ marginTop: 16 }}>
-                      По ТЗ изменение ИО должно происходить через создание его копии и дальнейшее редактирование копии.
-                    </div>
-                  </div>
-                </div>
-
-                <div className="card">
-                  <h2 className="section-title">Файлы</h2>
-                  <form onSubmit={handleUploadFiles}>
-                    <input
-                      className="input"
-                      type="file"
-                      multiple
-                      onChange={(e) => setUploadFiles(e.target.files)}
-                    />
-                    <div style={{ marginTop: 16 }}>
-                      <button className="btn" type="submit" disabled={loading || !uploadFiles?.length}>Загрузить</button>
-                    </div>
-                  </form>
-
-                  <div style={{ marginTop: 20 }}>
-                    {selectedFiles.length ? (
-                      <table className="table">
-                        <thead>
-                          <tr>
-                            <th>ID</th>
-                            <th>Имя</th>
-                            <th>Размер</th>
-                            <th>Действия</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {selectedFiles.map((file) => (
-                            <tr key={file.id}>
-                              <td>{file.id}</td>
-                              <td>{file.original_name}</td>
-                              <td>{file.size_bytes} байт</td>
-                              <td>
-                                <div className="row">
-                                  <a className="btn secondary" href={`/api/files/info-objects/${selectedInfoObject.id}/${file.id}/download`}>
-                                    Скачать
-                                  </a>
-                                  <button className="btn danger" type="button" onClick={() => void handleDetachFile(file.id)}>
-                                    Отвязать
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    ) : (
-                      <div className="muted">Файлы пока не прикреплены.</div>
-                    )}
-                  </div>
-                </div>
-              </div>
+                          <button
+                            className="btn danger"
+                            type="button"
+                            onClick={() => void handleHardDeleteInfoObject(item.id)}
+                            disabled={loading}
+                          >
+                            Удалить навсегда
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="muted">Удалённых объектов нет.</div>
             )}
-          </>
+          </div>
         )}
+    {activeTab === 'detail' && (
+  <>
+    {!selectedInfoObject ? (
+      <div className="card">
+        <h2 className="section-title">Карточка ИО</h2>
+        <div className="muted">Выберите ИО из списка.</div>
       </div>
+    ) : (
+      <>
+        <div
+          className="card"
+          style={
+            deletionState.code !== 'normal'
+              ? {
+                  border:
+                    deletionState.code === 'deleted'
+                      ? '1px solid #f5c2c7'
+                      : '1px solid #ffe69c',
+                  background:
+                    deletionState.code === 'deleted' ? '#fff5f5' : '#fffdf0',
+                }
+              : undefined
+          }
+        >
+          <div
+            className="row"
+            style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}
+          >
+            <div>
+              <h2 className="section-title" style={{ marginBottom: 8 }}>
+                {selectedInfoObject.title || `ИО #${selectedInfoObject.id}`}
+              </h2>
+              <div className={`status-badge ${deletionState.tone}`}>
+                {deletionState.label}
+              </div>
+            </div>
+
+            <div className="muted">ID: {selectedInfoObject.id}</div>
+          </div>
+
+          {(selectedInfoObject.deletion_flag || selectedDeletionRequest?.exists) && (
+            <div className="deletion-panel">
+              <div>
+                <strong>Статус:</strong> {deletionState.label}
+              </div>
+
+              {selectedDeletionRequest?.exists && (
+                <>
+                  <div>
+                    <strong>Статус запроса:</strong>{' '}
+                    {selectedDeletionRequest.status || '—'}
+                  </div>
+                  <div>
+                    <strong>Причина запроса:</strong>{' '}
+                    {selectedDeletionRequest.reason || '—'}
+                  </div>
+                  <div>
+                    <strong>Замещающий объект:</strong>{' '}
+                    {selectedDeletionRequest.replacement_info_object_id || '—'}
+                  </div>
+                </>
+              )}
+
+              {selectedInfoObject.deletion_flag && (
+                <>
+                  <div>
+                    <strong>Причина удаления:</strong>{' '}
+                    {selectedInfoObject.deletion_reason || '—'}
+                  </div>
+                  <div>
+                    <strong>Дата удаления:</strong>{' '}
+                    {selectedInfoObject.deleted_at || '—'}
+                  </div>
+                  <div>
+                    <strong>Замещающий объект:</strong>{' '}
+                    {selectedInfoObject.replacement_info_object_id || '—'}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+          
+          <div className="grid-2" style={{ marginTop: 20 }}>
+            <div>
+              <strong>Заголовок:</strong> {selectedInfoObject.title || '—'}
+            </div>
+            <div>
+              <strong>Автор:</strong> {selectedInfoObject.author || '—'}
+            </div>
+            <div>
+              <strong>Источник:</strong> {selectedInfoObject.source || '—'}
+            </div>
+            <div>
+              <strong>Название публикации:</strong>{' '}
+              {selectedInfoObject.publication_title || '—'}
+            </div>
+            <div>
+              <strong>URL:</strong> {selectedInfoObject.url || '—'}
+            </div>
+            <div>
+              <strong>DOI:</strong> {selectedInfoObject.doi || '—'}
+            </div>
+            <div>
+              <strong>Дата от:</strong>{' '}
+              {selectedInfoObject.publication_date_from_raw || '—'}
+            </div>
+            <div>
+              <strong>Дата до:</strong>{' '}
+              {selectedInfoObject.publication_date_to_raw || '—'}
+            </div>
+            <div>
+              <strong>Создал:</strong> {selectedInfoObject.created_by || '—'}
+            </div>
+            <div>
+              <strong>Текущий статус:</strong> {deletionState.label}
+            </div>
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <strong>Текст</strong>
+            <div className="detail-box">{selectedInfoObject.content || '—'}</div>
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <strong>Метки</strong>
+            <div className="row" style={{ marginTop: 8, flexWrap: 'wrap' }}>
+              {(selectedInfoObject.tags || []).length ? (
+                selectedInfoObject.tags!.map((tag) => (
+                  <span key={tag} className="badge">
+                    {tag}
+                  </span>
+                ))
+              ) : (
+                <span className="muted">Нет меток</span>
+              )}
+            </div>
+          </div>
+
+          <div className="row" style={{ marginTop: 20, flexWrap: 'wrap' }}>
+            <button
+              className="btn secondary"
+              type="button"
+              onClick={() => void handleExportSelectedInfoObject()}
+              disabled={loading}
+            >
+              Экспортировать объект
+            </button>
+          </div>
+        </div>
+
+        <div className="grid-2">
+          <div className="card">
+            <h2 className="section-title">Действия с объектом</h2>
+
+            <div className="row" style={{ flexWrap: 'wrap' }}>
+              <button
+                className="btn"
+                type="button"
+                onClick={handleCreateCopyFromSelected}
+                disabled={loading}
+              >
+                Создать копию для редактирования
+              </button>
+
+              <button
+                className="btn danger"
+                type="button"
+                onClick={() => void handleRequestDeletionInfoObject()}
+                disabled={!canRequestDeletion}
+                title={
+                  selectedInfoObject.deletion_flag
+                    ? 'Объект уже удалён'
+                    : selectedDeletionRequest?.exists &&
+                      selectedDeletionRequest.status === 'pending'
+                    ? 'Запрос на удаление уже отправлен'
+                    : ''
+                }
+              >
+                {selectedDeletionRequest?.exists &&
+                selectedDeletionRequest.status === 'pending'
+                  ? 'Запрос на удаление отправлен'
+                  : 'Запросить удаление'}
+              </button>
+
+              <button
+                className="btn secondary"
+                type="button"
+                onClick={() =>
+                  selectedInfoObject &&
+                  void handleRestoreDeletedInfoObject(selectedInfoObject.id)
+                }
+                disabled={!canRestoreDeleted}
+                title={!isDeletedForUi ? 'Объект не удалён' : ''}
+              >
+                Восстановить
+              </button>
+
+              <button
+                className="btn danger"
+                type="button"
+                onClick={() =>
+                  selectedInfoObject &&
+                  void handleHardDeleteInfoObject(selectedInfoObject.id)
+                }
+                disabled={!canHardDelete}
+                title={!isDeletedForUi ? 'Сначала объект должен быть удалён' : ''}
+              >
+                Удалить навсегда
+              </button>
+            </div>
+
+            <div className="muted" style={{ marginTop: 16 }}>
+              По ТЗ изменение ИО должно происходить через создание его копии и
+              дальнейшее редактирование копии.
+            </div>
+          </div>
+
+          <div className="card">
+            <h2 className="section-title">Файлы</h2>
+
+            <form onSubmit={handleUploadFiles}>
+              <input
+                className="input"
+                type="file"
+                multiple
+                onChange={(e) => setUploadFiles(e.target.files)}
+              />
+              <div style={{ marginTop: 16 }}>
+                <button
+                  className="btn"
+                  type="submit"
+                  disabled={loading || !uploadFiles?.length}
+                >
+                  Загрузить
+                </button>
+              </div>
+            </form>
+
+            <div style={{ marginTop: 20 }}>
+              {selectedFiles.length ? (
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Имя</th>
+                      <th>Размер</th>
+                      <th>Действия</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedFiles.map((file) => (
+                      <tr key={file.id}>
+                        <td>{file.id}</td>
+                        <td>{file.original_name}</td>
+                        <td>{file.size_bytes} байт</td>
+                        <td>
+                          <div className="row">
+                            <a
+                              className="btn secondary"
+                              href={`/api/files/info-objects/${selectedInfoObject.id}/${file.id}/download`}
+                            >
+                              Скачать
+                            </a>
+                            <button
+                              className="btn danger"
+                              type="button"
+                              onClick={() => void handleDetachFile(file.id)}
+                            >
+                              Отвязать
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="muted">Файлы пока не прикреплены.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      </>
+    )}
+  </>
+  )}
+ </div>
     </div>
   )
 }
