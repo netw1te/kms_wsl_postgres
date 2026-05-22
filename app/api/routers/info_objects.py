@@ -14,6 +14,8 @@ from app.utils.date_parser import normalize_partial_date
 from fastapi.responses import StreamingResponse
 from io import BytesIO
 from app.services.export_service import ExportService
+from app.auth import require_data_admin
+
 
 router = APIRouter(prefix="/info-objects", tags=["Информационные объекты"])
 
@@ -274,7 +276,7 @@ async def get_deleted_info_objects(
     sort: str = Query("deleted_at"),
     direction: str = Query("desc"),
     db: Session = Depends(get_db),
-    current_admin: CurrentUser = Depends(require_admin),
+    current_admin: CurrentUser = Depends(require_data_admin),
 ):
     service = InfoObjectService(db)
     service.purge_deleted_older_than(days=7)
@@ -350,7 +352,7 @@ async def soft_delete_info_object(
 async def restore_info_object(
     info_object_id: int,
     db: Session = Depends(get_db),
-    current_admin: CurrentUser = Depends(require_admin),
+    current_admin: CurrentUser = Depends(require_data_admin),
 ):
     service = InfoObjectService(db)
     restored = service.restore_info_object(info_object_id)
@@ -363,7 +365,7 @@ async def restore_info_object(
 async def hard_delete_info_object(
     info_object_id: int,
     db: Session = Depends(get_db),
-    current_admin: CurrentUser = Depends(require_admin),
+    current_admin: CurrentUser = Depends(require_data_admin),
 ):
     service = InfoObjectService(db)
     ok = service.hard_delete_info_object(info_object_id)

@@ -18,6 +18,10 @@ from app.models.captcha import Captcha
 from app.services.info_object_service import InfoObjectService
 from app.utils.date_parser import normalize_partial_date
 from datetime import datetime
+from app.auth import require_super_admin
+from app.auth import CurrentUser
+
+
 
 router = APIRouter(tags=["Web"])
 templates = Jinja2Templates(directory="templates")
@@ -473,7 +477,11 @@ async def app_edit_info_object_submit(
 
 
 @router.get("/app/admin/export", response_class=HTMLResponse)
-async def admin_export_page(request: Request, db: Session = Depends(get_db)):
+async def admin_export_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_admin: CurrentUser = Depends(require_super_admin),
+):
     user = session_user(request)
     if not user:
         return RedirectResponse(url="/login", status_code=303)

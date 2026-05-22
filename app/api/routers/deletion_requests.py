@@ -8,6 +8,8 @@ from app.auth import CurrentUser, get_current_user, require_admin
 from app.database import get_db
 from app.models.info_object import InfoObject
 from app.models.info_object_deletion_request import InfoObjectDeletionRequest
+from app.auth import require_data_admin
+
 
 
 router = APIRouter(prefix="/deletion-requests", tags=["Запросы на удаление"])
@@ -106,7 +108,7 @@ async def create_deletion_request(
 @router.get("", response_model=list[DeletionRequestResponse])
 async def list_deletion_requests(
     db: Session = Depends(get_db),
-    current_admin: CurrentUser = Depends(require_admin),
+    current_admin: CurrentUser = Depends(require_data_admin),
 ):
     items = (
         db.query(InfoObjectDeletionRequest)
@@ -132,7 +134,7 @@ async def list_deletion_requests(
 async def approve_delete_request(
     request_id: int,
     db: Session = Depends(get_db),
-    current_admin: CurrentUser = Depends(require_admin),
+    current_admin: CurrentUser = Depends(require_data_admin),
 ):
     item = (
         db.query(InfoObjectDeletionRequest)

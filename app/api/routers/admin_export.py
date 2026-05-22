@@ -6,12 +6,13 @@ from datetime import datetime
 from app.auth import require_admin, CurrentUser
 from app.database import get_db
 from app.services.export_db_service import ExportDBService
+from app.auth import require_super_admin
 
 router = APIRouter(prefix="/admin/export", tags=["Admin Export"])
 
 @router.get("/all")
 async def export_all_databases(
-    current_admin: CurrentUser = Depends(require_admin),
+    current_admin: CurrentUser = Depends(require_super_admin),
     db: Session = Depends(get_db)
 ):
     service = ExportDBService(db)
@@ -25,7 +26,7 @@ async def export_all_databases(
 
 @router.get("/kms")
 async def export_kms_databases(
-    current_admin: CurrentUser = Depends(require_admin),
+    current_admin: CurrentUser = Depends(require_super_admin),
     db: Session = Depends(get_db)
 ):
     service = ExportDBService(db)
@@ -40,7 +41,7 @@ async def export_kms_databases(
 @router.get("/user/{login}")
 async def export_user_database(
     login: str,
-    current_admin: CurrentUser = Depends(require_admin),
+    current_admin: CurrentUser = Depends(require_super_admin),
     db: Session = Depends(get_db)
 ):
     service = ExportDBService(db)
