@@ -6,7 +6,7 @@ from app.models.search_query import SearchQuery
 from app.services.search_query_service import SearchQueryService
 from fastapi import APIRouter, Depends, Form, Query, Request, UploadFile, File
 from app.services.media_file_service import MediaFileService
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
@@ -63,39 +63,20 @@ async def login_submit(
         captcha_code: str = Form(...),
         db: Session = Depends(get_db),
 ):
+
     # captcha_id = request.cookies.get("captcha_id")
     # if not captcha_id:
-    #     return templates.TemplateResponse(
-    #         "login.html",
-    #         {"request": request, "error": "Требуется капча", "session_user": None},
-    #         status_code=401,
-    #     )
-    #
-    # captcha_record = db.query(Captcha).filter(
-    #     Captcha.session_id == captcha_id,
-    #     Captcha.expires_at > datetime.now(),
-    #     Captcha.used == 0
-    # ).first()
-    #
-    # if not captcha_record:
-    #     return templates.TemplateResponse(
-    #         "login.html",
-    #         {"request": request, "error": "Капча устарела, обновите страницу", "session_user": None},
-    #         status_code=401,
-    #     )
-    #
-    # if captcha_record.text.upper() != captcha_code.strip().upper():
-    #     return templates.TemplateResponse(
-    #         "login.html",
-    #         {"request": request, "error": "Неверный код с картинки", "session_user": None},
-    #         status_code=401,
-    #     )
-    #
-    # captcha_record.used = 1
-    # db.commit()
+    #     if "application/json" in request.headers.get("accept", ""):
+    #         return JSONResponse(status_code=400, content={"error": "Требуется капча"})
 
     user = authenticate_user(db, login, password)
     if user is None:
+        if "application/json" in request.headers.get("accept", ""):
+            return JSONResponse(
+                status_code=401,
+                content={"error": "Неверный логин или пароль"}
+            )
+
         return templates.TemplateResponse(
             "login.html",
             {"request": request, "error": "Неверный логин или пароль", "session_user": None},
@@ -109,6 +90,10 @@ async def login_submit(
         "email": user.email,
         "role": user.role,
     }
+
+    if "application/json" in request.headers.get("accept", ""):
+        return JSONResponse(content={"ok": True})
+
     return RedirectResponse(url="/app", status_code=303)
 
 

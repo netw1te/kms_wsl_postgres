@@ -25,7 +25,7 @@ def main() -> None:
             user = User(
                 login='user',
                 password=password_encoder.encode('user123'),
-                full_name='Обычный пользователь',
+                full_name='Пользователь',
                 email='user@example.com',
                 role='ROLE_USER',
             )

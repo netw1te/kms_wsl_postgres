@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
@@ -95,23 +95,20 @@ def authenticate_user(db: Session, login: str, password: str):
 
 
 async def get_current_user(
-    credentials: HTTPBasicCredentials | None = Depends(security),
+    request: Request,
     db: Session = Depends(get_db),
 ):
-    if credentials is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Требуется авторизация",
-        )
+    session_user = request.session.get("user")
+    if session_user:
+        user_id = session_user.get("id")
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            return user
 
-    user = authenticate_user(db, credentials.username, credentials.password)
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Неверный логин или пароль",
-        )
-
-    return user
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Не авторизован",
+    )
 
 
 def require_admin(current_user=Depends(get_current_user)):
