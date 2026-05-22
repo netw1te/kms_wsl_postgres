@@ -11,12 +11,13 @@ class InfoObjectCreate(BaseModel):
     author: Optional[str] = None
     url: Optional[str] = None
     doi: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
 
     publication_title: Optional[str] = None
     publication_date_from_raw: Optional[str] = None
     publication_date_to_raw: Optional[str] = None
 
-    tags: List[str] = Field(default_factory=list)
+    publication_date_raw: str
 
 
 class InfoObjectUpdate(BaseModel):
@@ -26,12 +27,13 @@ class InfoObjectUpdate(BaseModel):
     author: Optional[str] = None
     url: Optional[str] = None
     doi: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
 
     publication_title: Optional[str] = None
     publication_date_from_raw: Optional[str] = None
     publication_date_to_raw: Optional[str] = None
 
-    tags: List[str] = Field(default_factory=list)
+    publication_date_raw: str
 
 
 class InfoObjectResponse(BaseModel):
@@ -42,6 +44,12 @@ class InfoObjectResponse(BaseModel):
     author: Optional[str] = None
     url: Optional[str] = None
     doi: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+    created_by: Optional[int] = None
+    deletion_flag: bool = False
+    deletion_reason: Optional[str] = None
 
     publication_title: Optional[str] = None
     publication_date_from_raw: Optional[str] = None
@@ -49,15 +57,5 @@ class InfoObjectResponse(BaseModel):
     publication_date_from: Optional[datetime] = None
     publication_date_to: Optional[datetime] = None
 
-    tags: List[str] = Field(default_factory=list)
-
-    created_at: datetime
-    updated_at: datetime
-    created_by: Optional[int] = None
-
-    deletion_flag: bool = False
-    deletion_reason: Optional[str] = None
-    deleted_by: Optional[int] = None
-    replacement_info_object_id: Optional[int] = None
-
-    model_config = ConfigDict(from_attributes=True)
+    publication_date_raw: str
+    publication_date: datetime

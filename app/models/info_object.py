@@ -50,6 +50,8 @@ class InfoObject(Base):
     publication_date_to_raw = Column(String(20))
     publication_date_from = Column(DateTime, nullable=True)
     publication_date_to = Column(DateTime, nullable=True)
+    publication_date_raw = Column(String(20), nullable=False)
+    publication_date = Column(DateTime, nullable=False)
 
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())

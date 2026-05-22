@@ -14,9 +14,10 @@ export type InfoObject = {
   publication_title?: string | null
   publication_date_from_raw?: string | null
   publication_date_to_raw?: string | null
+  publication_date_raw?: string
+  publication_date?: string
   tags?: string[]
   created_by?: number | null
-
   deletion_flag?: boolean
   deletion_reason?: string | null
   deleted_by?: number | null
@@ -88,6 +89,11 @@ export type UserAdminRecord = {
   full_name?: string | null
   email?: string | null
   role: string
+  access_start?: string | null
+  access_end?: string | null
+  is_user_admin?: boolean
+  is_data_admin?: boolean
+  is_super_admin?: boolean
 }
 
 export type DeletionRequestRecord = {

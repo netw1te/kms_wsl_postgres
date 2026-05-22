@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from datetime import datetime
+from typing import Optional
 
-from app.auth import CurrentUser, PasswordEncoder, get_current_user, require_admin
+from app.auth import CurrentUser, PasswordEncoder, get_current_user, require_user_admin, require_admin
 from app.database import get_db
 from app.models.user import User
-
 
 router = APIRouter(prefix="/users", tags=["Пользователи"])
 
@@ -26,6 +27,17 @@ class UserCreateByAdminRequest(BaseModel):
     role: str = "ROLE_USER"
 
 
+class UserUpdateRequest(BaseModel):
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+    role: Optional[str] = None
+    access_start: Optional[str] = None
+    access_end: Optional[str] = None
+    is_user_admin: Optional[bool] = None
+    is_data_admin: Optional[bool] = None
+    is_super_admin: Optional[bool] = None
+
+
 def serialize_user(user: User) -> UserResponse:
     return UserResponse(
         id=user.id,
@@ -38,7 +50,7 @@ def serialize_user(user: User) -> UserResponse:
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(
-    current_user: CurrentUser = Depends(get_current_user),
+        current_user: CurrentUser = Depends(get_current_user),
 ):
     return UserResponse(
         id=current_user.id,
@@ -51,7 +63,7 @@ async def get_me(
 
 @router.get("/info", response_model=UserResponse)
 async def get_info(
-    current_user: CurrentUser = Depends(get_current_user),
+        current_user: CurrentUser = Depends(get_current_user),
 ):
     return UserResponse(
         id=current_user.id,
@@ -64,8 +76,8 @@ async def get_info(
 
 @router.get("", response_model=list[UserResponse])
 async def get_all_users(
-    db: Session = Depends(get_db),
-    current_admin: CurrentUser = Depends(require_admin),
+        db: Session = Depends(get_db),
+        current_admin: CurrentUser = Depends(require_user_admin),
 ):
     users = db.query(User).order_by(User.id.asc()).all()
     return [serialize_user(user) for user in users]
@@ -73,9 +85,9 @@ async def get_all_users(
 
 @router.post("/admin-create", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def create_user_by_admin(
-    payload: UserCreateByAdminRequest,
-    db: Session = Depends(get_db),
-    current_admin: CurrentUser = Depends(require_admin),
+        payload: UserCreateByAdminRequest,
+        db: Session = Depends(get_db),
+        current_admin: CurrentUser = Depends(require_user_admin),
 ):
     login = payload.login.strip()
     password = payload.password.strip()
@@ -110,3 +122,88 @@ async def create_user_by_admin(
     db.refresh(user)
 
     return serialize_user(user)
+
+
+@router.put("/{user_id}", response_model=UserResponse)
+async def update_user(
+        user_id: int,
+        payload: UserUpdateRequest,
+        db: Session = Depends(get_db),
+        current_admin: CurrentUser = Depends(require_user_admin),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if payload.full_name is not None:
+        user.full_name = payload.full_name
+    if payload.email is not None:
+        user.email = payload.email
+    if payload.role is not None:
+        if payload.role not in ["ROLE_USER", "ROLE_ADMIN"]:
+            raise HTTPException(status_code=400, detail="Invalid role")
+        user.role = payload.role
+    if payload.access_start is not None:
+        user.access_start = datetime.fromisoformat(payload.access_start) if payload.access_start else None
+    if payload.access_end is not None:
+        user.access_end = datetime.fromisoformat(payload.access_end) if payload.access_end else None
+    if payload.is_user_admin is not None:
+        user.is_user_admin = payload.is_user_admin
+    if payload.is_data_admin is not None:
+        user.is_data_admin = payload.is_data_admin
+    if payload.is_super_admin is not None:
+        user.is_super_admin = payload.is_super_admin
+
+    db.commit()
+    db.refresh(user)
+
+    return serialize_user(user)
+
+
+@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_user(
+        user_id: int,
+        db: Session = Depends(get_db),
+        current_admin: CurrentUser = Depends(require_user_admin),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user.id == current_admin.id:
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+
+    db.delete(user)
+    db.commit()
+
+
+@router.post("/{user_id}/block")
+async def block_user(
+        user_id: int,
+        db: Session = Depends(get_db),
+        current_admin: CurrentUser = Depends(require_user_admin),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.access_end = datetime(1970, 1, 1)
+    db.commit()
+
+    return {"message": "User blocked", "user_id": user_id}
+
+
+@router.post("/{user_id}/unblock")
+async def unblock_user(
+        user_id: int,
+        db: Session = Depends(get_db),
+        current_admin: CurrentUser = Depends(require_user_admin),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.access_end = None
+    db.commit()
+
+    return {"message": "User unblocked", "user_id": user_id}

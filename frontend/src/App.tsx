@@ -50,6 +50,7 @@ const emptyCreateForm = {
   publication_title: '',
   publication_date_from_raw: '',
   publication_date_to_raw: '',
+  publication_date_raw: '',
   tags: '',
 }
 
@@ -285,6 +286,16 @@ export default function App() {
   const [tagDeleteValue, setTagDeleteValue] = useState('')
   const [tagScope, setTagScope] = useState<'mine' | 'all'>('mine')
   const [pendingTagActions, setPendingTagActions] = useState<PendingTagAction[]>([])
+  const [editingUserId, setEditingUserId] = useState<number | null>(null)
+  const [editAccessStart, setEditAccessStart] = useState('')
+  const [editAccessEnd, setEditAccessEnd] = useState('')
+  const [editFullName, setEditFullName] = useState('')
+  const [editEmail, setEditEmail] = useState('')
+  const [editRole, setEditRole] = useState('')
+  const [editIsUserAdmin, setEditIsUserAdmin] = useState(false)
+  const [editIsDataAdmin, setEditIsDataAdmin] = useState(false)
+  const [editIsSuperAdmin, setEditIsSuperAdmin] = useState(false)
+  const [showUserManagement, setShowUserManagement] = useState(false)
 
   
   const isAuthenticated = !!credentials
@@ -438,6 +449,7 @@ export default function App() {
     publication_title: item.publication_title ?? '',
     publication_date_from_raw: item.publication_date_from_raw ?? '',
     publication_date_to_raw: item.publication_date_to_raw ?? '',
+    publication_date_raw: item.publication_date_raw ?? '',
     tags: (item.tags ?? []).join(', '),
   })
   }
@@ -1412,6 +1424,118 @@ async function handleReplaceTag() {
     }
   }
 
+  async function handleUpdateUser(userId: number) {
+    if (!credentials) return
+
+    setLoading(true)
+    setError(null)
+    try {
+      const body: any = {}
+      if (editFullName !== undefined) body.full_name = editFullName || null
+      if (editEmail !== undefined) body.email = editEmail || null
+      if (editRole !== undefined) body.role = editRole
+      if (editAccessStart !== undefined) body.access_start = editAccessStart || null
+      if (editAccessEnd !== undefined) body.access_end = editAccessEnd || null
+      if (editIsUserAdmin !== undefined) body.is_user_admin = editIsUserAdmin
+      if (editIsDataAdmin !== undefined) body.is_data_admin = editIsDataAdmin
+      if (editIsSuperAdmin !== undefined) body.is_super_admin = editIsSuperAdmin
+
+      await apiFetch(`/users/${userId}`, credentials, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      })
+      await loadDashboard()
+      setEditingUserId(null)
+      setEditFullName('')
+      setEditEmail('')
+      setEditRole('')
+      setEditAccessStart('')
+      setEditAccessEnd('')
+      setEditIsUserAdmin(false)
+      setEditIsDataAdmin(false)
+      setEditIsSuperAdmin(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Ошибка обновления пользователя')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleDeleteUser(userId: number, userLogin: string) {
+    if (!credentials) return
+    if (!confirm(`Удалить пользователя ${userLogin} навсегда? Это действие необратимо.`)) return
+
+    setLoading(true)
+    setError(null)
+    try {
+      await apiFetch(`/users/${userId}`, credentials, { method: 'DELETE' })
+      await loadDashboard()
+      if (selectedInfoObject?.created_by === userId) {
+        clearSelectedInfoObject()
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Ошибка удаления пользователя')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleBlockUser(userId: number, userLogin: string) {
+    if (!credentials) return
+    if (!confirm(`Заблокировать пользователя ${userLogin}? Он не сможет войти в систему.`)) return
+
+    setLoading(true)
+    setError(null)
+    try {
+      await apiFetch(`/users/${userId}/block`, credentials, { method: 'POST' })
+      await loadDashboard()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Ошибка блокировки пользователя')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleUnblockUser(userId: number, userLogin: string) {
+    if (!credentials) return
+    if (!confirm(`Разблокировать пользователя ${userLogin}?`)) return
+
+    setLoading(true)
+    setError(null)
+    try {
+      await apiFetch(`/users/${userId}/unblock`, credentials, { method: 'POST' })
+      await loadDashboard()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Ошибка разблокировки пользователя')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function startEditUser(user: UserAdminRecord) {
+    setEditingUserId(user.id)
+    setEditFullName(user.full_name || '')
+    setEditEmail(user.email || '')
+    setEditRole(user.role)
+    setEditAccessStart(user.access_start || '')
+    setEditAccessEnd(user.access_end || '')
+    setEditIsUserAdmin(user.is_user_admin || false)
+    setEditIsDataAdmin(user.is_data_admin || false)
+    setEditIsSuperAdmin(user.is_super_admin || false)
+  }
+
+  function cancelEdit() {
+    setEditingUserId(null)
+    setEditFullName('')
+    setEditEmail('')
+    setEditRole('')
+    setEditAccessStart('')
+    setEditAccessEnd('')
+    setEditIsUserAdmin(false)
+    setEditIsDataAdmin(false)
+    setEditIsSuperAdmin(false)
+  }
+
   if (!isAuthenticated) {
     return (
       <div className="auth-shell">
@@ -1633,6 +1757,19 @@ async function handleReplaceTag() {
             </button>
           )}
 
+          {isAdmin && (
+            <button
+              className={`tab ${showUserManagement ? 'active' : ''}`}
+              onClick={() => {
+                setShowUserManagement(true)
+                setActiveTab('')
+                navigateToTab('')
+              }}
+            >
+              Управление пользователями
+            </button>
+          )}
+
           <button className={`tab ${activeTab === 'detail' ? 'active' : ''}`} onClick={() => navigateToTab('detail')}>
             Карточка и файлы
           </button>
@@ -1726,6 +1863,10 @@ async function handleReplaceTag() {
                 <input className="input" placeholder="Название публикации" value={createForm.publication_title} onChange={(e) => setCreateForm((s) => ({ ...s, publication_title: e.target.value }))} />
                 <input className="input" placeholder="Дата от" value={createForm.publication_date_from_raw} onChange={(e) => setCreateForm((s) => ({ ...s, publication_date_from_raw: e.target.value }))} />
                 <input className="input" placeholder="Дата до" value={createForm.publication_date_to_raw} onChange={(e) => setCreateForm((s) => ({ ...s, publication_date_to_raw: e.target.value }))} />
+              </div>
+
+              <div style={{ marginTop: 16 }}>
+                <input className="input" placeholder="Дата публикации статьи (обязательно)" value={createForm.publication_date_raw} onChange={(e) => setCreateForm((s) => ({ ...s, publication_date_raw: e.target.value }))} />
               </div>
 
               <div style={{ marginTop: 16 }}>
@@ -2056,6 +2197,193 @@ async function handleReplaceTag() {
               </table>
             ) : (
               <div className="muted">Запросов на удаление пока нет.</div>
+            )}
+          </div>
+        )}
+        {showUserManagement && isAdmin && (
+          <div className="card">
+            <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h2 className="section-title" style={{ margin: 0 }}>Управление пользователями</h2>
+              <button className="btn secondary" onClick={() => setShowUserManagement(false)}>Закрыть</button>
+            </div>
+
+            <p className="muted">Администратор может управлять пользователями: редактировать, блокировать, удалять, назначать права.</p>
+
+            {adminUsers.length ? (
+              <div style={{ overflowX: 'auto' }}>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Логин</th>
+                      <th>ФИО</th>
+                      <th>Email</th>
+                      <th>Роль</th>
+                      <th>Доступ с</th>
+                      <th>Доступ по</th>
+                      <th>Права админа</th>
+                      <th>Действия</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {adminUsers.map((user) => (
+                      <tr key={user.id} style={editingUserId === user.id ? { background: '#eef2ff' } : {}}>
+                        <td>{user.id}</td>
+                        <td>
+                          <strong>{user.login}</strong>
+                          {user.id === currentUser?.id && <span className="badge" style={{ marginLeft: 8 }}>Вы</span>}
+                        </td>
+                        <td>
+                          {editingUserId === user.id ? (
+                            <input
+                              className="input"
+                              value={editFullName}
+                              onChange={(e) => setEditFullName(e.target.value)}
+                              placeholder="ФИО"
+                              style={{ minWidth: 150 }}
+                            />
+                          ) : (
+                            user.full_name || '—'
+                          )}
+                        </td>
+                        <td>
+                          {editingUserId === user.id ? (
+                            <input
+                              className="input"
+                              value={editEmail}
+                              onChange={(e) => setEditEmail(e.target.value)}
+                              placeholder="Email"
+                              style={{ minWidth: 150 }}
+                            />
+                          ) : (
+                            user.email || '—'
+                          )}
+                        </td>
+                        <td>
+                          {editingUserId === user.id ? (
+                            <select
+                              className="input"
+                              value={editRole}
+                              onChange={(e) => setEditRole(e.target.value)}
+                              style={{ minWidth: 120 }}
+                            >
+                              <option value="ROLE_USER">ROLE_USER</option>
+                              <option value="ROLE_ADMIN">ROLE_ADMIN</option>
+                            </select>
+                          ) : (
+                            user.role
+                          )}
+                        </td>
+                        <td>
+                          {editingUserId === user.id ? (
+                            <input
+                              className="input"
+                              type="datetime-local"
+                              value={editAccessStart}
+                              onChange={(e) => setEditAccessStart(e.target.value)}
+                              style={{ minWidth: 160 }}
+                            />
+                          ) : (
+                            user.access_start ? new Date(user.access_start).toLocaleString() : 'бессрочно'
+                          )}
+                        </td>
+                        <td>
+                          {editingUserId === user.id ? (
+                            <input
+                              className="input"
+                              type="datetime-local"
+                              value={editAccessEnd}
+                              onChange={(e) => setEditAccessEnd(e.target.value)}
+                              style={{ minWidth: 160 }}
+                            />
+                          ) : (
+                            user.access_end ? new Date(user.access_end).toLocaleString() : 'бессрочно'
+                          )}
+                        </td>
+                        <td>
+                          {editingUserId === user.id ? (
+                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                              <label style={{ fontSize: 12 }}>
+                                <input
+                                  type="checkbox"
+                                  checked={editIsUserAdmin}
+                                  onChange={(e) => setEditIsUserAdmin(e.target.checked)}
+                                /> Управление пользователями
+                              </label>
+                              <label style={{ fontSize: 12 }}>
+                                <input
+                                  type="checkbox"
+                                  checked={editIsDataAdmin}
+                                  onChange={(e) => setEditIsDataAdmin(e.target.checked)}
+                                /> Управление данными
+                              </label>
+                              <label style={{ fontSize: 12 }}>
+                                <input
+                                  type="checkbox"
+                                  checked={editIsSuperAdmin}
+                                  onChange={(e) => setEditIsSuperAdmin(e.target.checked)}
+                                /> Суперадмин
+                              </label>
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: 12 }}>
+                              {user.is_user_admin && <span className="badge">Управление пользователями</span>}
+                              {user.is_data_admin && <span className="badge">Управление данными</span>}
+                              {user.is_super_admin && <span className="badge">Суперадмин</span>}
+                              {!user.is_user_admin && !user.is_data_admin && !user.is_super_admin && <span className="muted">—</span>}
+                            </div>
+                          )}
+                        </td>
+                        <td>
+                          {editingUserId === user.id ? (
+                            <div className="row">
+                              <button className="btn" onClick={() => handleUpdateUser(user.id)} disabled={loading}>
+                                Сохранить
+                              </button>
+                              <button className="btn secondary" onClick={cancelEdit} disabled={loading}>
+                                Отмена
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="row">
+                              <button className="btn secondary" onClick={() => startEditUser(user)} disabled={loading}>
+                                Изменить
+                              </button>
+                              {user.id !== currentUser?.id && (
+                                <>
+                                  <button
+                                    className="btn danger"
+                                    onClick={() => handleBlockUser(user.id, user.login)}
+                                    disabled={loading}
+                                  >
+                                    Блок
+                                  </button>
+                                  <button
+                                    className="btn secondary"
+                                    onClick={() => handleUnblockUser(user.id, user.login)}
+                                    disabled={loading}
+                                  >
+                                    Разблок
+                                  </button>
+                                  <button
+                                    className="btn danger"
+                                    onClick={() => handleDeleteUser(user.id, user.login)}
+                                    disabled={loading}
+                                  >
+                                    Удалить
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="muted">Пользователи не загружены.</div>
             )}
           </div>
         )}

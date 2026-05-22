@@ -351,3 +351,10 @@ label {
   background: white;
   white-space: pre-wrap;
 }
+
+input[type="datetime-local"] {
+  font-family: inherit;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+}

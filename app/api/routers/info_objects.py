@@ -30,6 +30,8 @@ class InfoObjectCreate(BaseModel):
     publication_date_from_raw: Optional[str] = None
     publication_date_to_raw: Optional[str] = None
 
+    publication_date_raw: str
+
     tags: List[str] = Field(default_factory=list)
 
 
@@ -44,6 +46,8 @@ class InfoObjectUpdate(BaseModel):
     publication_title: Optional[str] = None
     publication_date_from_raw: Optional[str] = None
     publication_date_to_raw: Optional[str] = None
+
+    publication_date_raw: str
 
     tags: List[str] = Field(default_factory=list)
 
@@ -63,6 +67,9 @@ class InfoObjectResponse(BaseModel):
     publication_date_from: Optional[datetime] = None
     publication_date_to: Optional[datetime] = None
 
+    publication_date_raw: str
+    publication_date: datetime
+
     tags: List[str] = Field(default_factory=list)
 
     created_at: datetime
@@ -73,9 +80,6 @@ class InfoObjectResponse(BaseModel):
     deletion_reason: Optional[str] = None
     deleted_by: Optional[int] = None
     replacement_info_object_id: Optional[int] = None
-    deleted_at: Optional[datetime] = None
-
-    model_config = ConfigDict(from_attributes=True)
 
 
 class PageResponse(BaseModel):
@@ -100,6 +104,8 @@ def serialize_info_object(obj: InfoObject) -> dict:
         "publication_date_to_raw": obj.publication_date_to_raw,
         "publication_date_from": obj.publication_date_from,
         "publication_date_to": obj.publication_date_to,
+        "publication_date_raw": obj.publication_date_raw,
+        "publication_date": obj.publication_date,
         "tags": [tag.name for tag in obj.tags],
         "created_at": obj.created_at,
         "updated_at": obj.updated_at,
@@ -108,7 +114,6 @@ def serialize_info_object(obj: InfoObject) -> dict:
         "deletion_reason": obj.deletion_reason,
         "deleted_by": obj.deleted_by,
         "replacement_info_object_id": obj.replacement_info_object_id,
-        "deleted_at": obj.deleted_at,
     }
 
 
@@ -128,6 +133,10 @@ def apply_payload(info_object: InfoObject, payload: InfoObjectCreate | InfoObjec
     info_object.publication_date_to_raw = raw_to
     info_object.publication_date_from = normalized_from
     info_object.publication_date_to = normalized_to
+
+    raw_publication, normalized_publication = normalize_partial_date(payload.publication_date_raw, is_end=False)
+    info_object.publication_date_raw = raw_publication
+    info_object.publication_date = normalized_publication
 
 
 @router.get("/my", response_model=PageResponse)
