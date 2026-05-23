@@ -42,10 +42,10 @@ class CurrentUser:
         return self.is_super_admin or self.is_user_admin or self.is_data_admin or self.role == "ROLE_ADMIN"
 
     def can_manage_users(self) -> bool:
-        return self.is_super_admin or self.is_user_admin
+        return self.is_user_admin or self.is_super_admin
 
     def can_manage_data(self) -> bool:
-        return self.is_super_admin or self.is_data_admin
+        return self.is_data_admin or self.is_super_admin
 
     def can_manage_system(self) -> bool:
         return self.is_super_admin

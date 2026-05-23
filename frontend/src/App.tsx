@@ -321,9 +321,9 @@ export default function App() {
   
   const isAuthenticated = !!credentials
   const hasFilters = useMemo(() => Object.values(filters).some(Boolean), [filters])
-  const isUserAdmin = !!currentUser?.is_user_admin
-  const isDataAdmin = !!currentUser?.is_data_admin
   const isSuperAdmin = !!currentUser?.is_super_admin
+  const isUserAdmin = !!currentUser?.is_user_admin || isSuperAdmin
+  const isDataAdmin = !!currentUser?.is_data_admin || isSuperAdmin
   const isAdmin = isUserAdmin || isDataAdmin || isSuperAdmin
   const deletionState = getInfoObjectDeletionState(selectedInfoObject)
 
@@ -375,15 +375,15 @@ export default function App() {
           apiFetch<AgreementStatus>('/agreements/me', credentials),
         ])
         let usersList: UserAdminRecord[] = []
-        if (me.is_user_admin) {
+        if (me.is_user_admin || me.is_super_admin) {
           usersList = await apiFetch<UserAdminRecord[]>('/users', credentials)
         }
         let deletionList: DeletionRequestRecord[] = []
-        if (me.is_data_admin) {
+        if (me.is_data_admin || me.is_super_admin) {
           deletionList = await apiFetch<DeletionRequestRecord[]>('/deletion-requests', credentials)
         }
         let deletedList: InfoObjectPage | null = null
-        if (me.is_data_admin) {
+        if (me.is_data_admin || me.is_super_admin) {
           deletedList = await apiFetch<InfoObjectPage>('/info-objects/deleted?page=0&size=20', credentials)
         }
         setDeletedInfoObjects(deletedList)
@@ -1625,10 +1625,11 @@ async function handleReplaceTag() {
   }
 
   function getUserRoleLabel(user: UserAdminRecord): string {
+    if (user.is_super_admin) return 'Суперадминистратор'
+
     const roles = []
     if (user.is_user_admin) roles.push('Администратор пользователей')
     if (user.is_data_admin) roles.push('Администратор данных')
-    if (user.is_super_admin) roles.push('Суперадминистратор')
     if (roles.length === 0) return 'Пользователь'
     return roles.join(', ')
   }
@@ -1965,13 +1966,6 @@ async function handleReplaceTag() {
             />
 
             {/* Результаты поиска */}
-            <div style={{ marginTop: 24 }}>
-              {(infoObjects?.items ?? []).map((item) => (
-                <div className="card" key={item.id}>
-                  {/* ... карточка результата ... */}
-                </div>
-              ))}
-            </div>
 
             {/* НОВОЕ: Пагинация */}
             {infoObjects && infoObjects.pages > 1 && (
