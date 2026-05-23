@@ -36,8 +36,7 @@ class InfoObjectCreate(BaseModel):
     publication_date_from_raw: Optional[str] = None
     publication_date_to_raw: Optional[str] = None
 
-    publication_date_raw: str
-
+    publication_date_raw: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
 
 
@@ -53,8 +52,7 @@ class InfoObjectUpdate(BaseModel):
     publication_date_from_raw: Optional[str] = None
     publication_date_to_raw: Optional[str] = None
 
-    publication_date_raw: str
-
+    publication_date_raw: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
 
 
@@ -73,8 +71,8 @@ class InfoObjectResponse(BaseModel):
     publication_date_from: Optional[datetime] = None
     publication_date_to: Optional[datetime] = None
 
-    publication_date_raw: str
-    publication_date: datetime
+    publication_date_raw: Optional[str] = None
+    publication_date: Optional[datetime] = None
 
     tags: List[str] = Field(default_factory=list)
 
@@ -110,8 +108,8 @@ def serialize_info_object(obj: InfoObject) -> dict:
         "publication_date_to_raw": obj.publication_date_to_raw,
         "publication_date_from": obj.publication_date_from,
         "publication_date_to": obj.publication_date_to,
-        "publication_date_raw": obj.publication_date_raw,
-        "publication_date": obj.publication_date,
+        "publication_date_raw": getattr(obj, "publication_date_raw", None),
+        "publication_date": getattr(obj, "publication_date", None),
         "tags": [tag.name for tag in obj.tags],
         "created_at": obj.created_at,
         "updated_at": obj.updated_at,
