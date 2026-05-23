@@ -13,7 +13,12 @@ import type {
   DeletionRequestRecord,
   DeletionRequestStatus,
 } from './types'
-import { apiFetch, apiFetchBlob, STORAGE_KEY, parseTags } from './api'
+import {apiFetch, apiFetchBlob, STORAGE_KEY, parseTags, buildAuthHeader} from './api'
+import { ComplexQueryBuilder } from './components/ComplexQueryBuilder'
+import { ComplexQueryGroup, createEmptyGroup } from './types/complexQuery'
+import type { SortField, SortDirection } from './types'
+import { SortControls } from './components/SortControls'
+import { Pagination } from './components/Pagination'
 
 type MediaFile = {
   id: number
@@ -71,7 +76,9 @@ type CurrentUserInfo = {
   login: string
   full_name?: string | null
   email?: string | null
-  role: string
+  is_user_admin: boolean
+  is_data_admin: boolean
+  is_super_admin: boolean
 }
 
 type PendingTagAction =
@@ -254,7 +261,9 @@ export default function App() {
     password: '',
     full_name: '',
     email: '',
-    role: 'ROLE_USER',
+    is_user_admin: false,
+    is_data_admin: false,
+    is_super_admin: false,
   })
   const [selectedDeletionRequest, setSelectedDeletionRequest] = useState<DeletionRequestStatus | null>(null)
   const [historyIndex, setHistoryIndex] = useState(0)
@@ -296,11 +305,19 @@ export default function App() {
   const [editIsDataAdmin, setEditIsDataAdmin] = useState(false)
   const [editIsSuperAdmin, setEditIsSuperAdmin] = useState(false)
   const [showUserManagement, setShowUserManagement] = useState(false)
+  const [showComplexQueryBuilder, setShowComplexQueryBuilder] = useState(false)
+  const [complexQuery, setComplexQuery] = useState<ComplexQueryGroup>(createEmptyGroup('AND'))
+  const [isComplexSearch, setIsComplexSearch] = useState(false)
+  const [sortField, setSortField] = useState<SortField>('id')
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
 
   
   const isAuthenticated = !!credentials
   const hasFilters = useMemo(() => Object.values(filters).some(Boolean), [filters])
-  const isAdmin = !!currentUser?.role?.includes('ROLE_ADMIN')
+  const isUserAdmin = !!currentUser?.is_user_admin
+  const isDataAdmin = !!currentUser?.is_data_admin
+  const isSuperAdmin = !!currentUser?.is_super_admin
+  const isAdmin = isUserAdmin || isDataAdmin || isSuperAdmin
   const deletionState = getInfoObjectDeletionState(selectedInfoObject)
 
  const isDeletedForUi =
@@ -351,15 +368,15 @@ export default function App() {
           apiFetch<AgreementStatus>('/agreements/me', credentials),
         ])
         let usersList: UserAdminRecord[] = []
-        if (me.role.includes('ROLE_ADMIN')) {
+        if (me.is_user_admin) {
           usersList = await apiFetch<UserAdminRecord[]>('/users', credentials)
         }
         let deletionList: DeletionRequestRecord[] = []
-        if (me.role.includes('ROLE_ADMIN')) {
+        if (me.is_data_admin) {
           deletionList = await apiFetch<DeletionRequestRecord[]>('/deletion-requests', credentials)
         }
         let deletedList: InfoObjectPage | null = null
-        if (me.role.includes('ROLE_ADMIN')) {
+        if (me.is_data_admin) {
           deletedList = await apiFetch<InfoObjectPage>('/info-objects/deleted?page=0&size=20', credentials)
         }
         setDeletedInfoObjects(deletedList)
@@ -590,7 +607,7 @@ export default function App() {
     setCaptchaCode('')
     setCaptchaError('')
   }
-  async function handleSearch() {
+  async function handleSearch(pageNum: number = 0) {
     if (!credentials) return
     setLoading(true)
     setError(null)
@@ -605,8 +622,11 @@ export default function App() {
           params.set(key, value.trim())
         }
       })
-      params.set('page', '0')
+      params.set('page', String(pageNum))
       params.set('size', '20')
+      params.set('sort', sortField)
+      params.set('direction', sortDirection)
+
       const result = await apiFetch<InfoObjectPage>(`/info-objects/search?${params.toString()}`, credentials)
       setInfoObjects(result)
       pushViewState({
@@ -616,6 +636,38 @@ export default function App() {
       })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Ошибка поиска')
+    } finally {
+      setLoading(false)
+    }
+  }
+  async function handleComplexSearch() {
+    if (!credentials) return
+
+    setLoading(true)
+    setError(null)
+
+    try {
+      // Используем POST с телом запроса
+      const response = await fetch(`/api/complex-search?page=0&size=20&sort=${sortField}&direction=${sortDirection}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': buildAuthHeader(credentials),
+        },
+        body: JSON.stringify({ root: complexQuery }),
+      })
+
+      if (!response.ok) {
+        const text = await response.text()
+        throw new Error(text || `HTTP ${response.status}`)
+      }
+
+      const result: InfoObjectPage = await response.json()
+      setInfoObjects(result)
+      setActiveTab('info-objects')
+      setShowComplexQueryBuilder(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Ошибка сложного поиска')
     } finally {
       setLoading(false)
     }
@@ -898,7 +950,9 @@ export default function App() {
         password: '',
         full_name: '',
         email: '',
-        role: 'ROLE_USER',
+        is_user_admin: false,
+        is_data_admin: false,
+        is_super_admin: false,
       })
 
       await loadDashboard()
@@ -1536,6 +1590,15 @@ async function handleReplaceTag() {
     setEditIsSuperAdmin(false)
   }
 
+  function getUserRoleLabel(user: UserAdminRecord): string {
+    const roles = []
+    if (user.is_user_admin) roles.push('Администратор пользователей')
+    if (user.is_data_admin) roles.push('Администратор данных')
+    if (user.is_super_admin) roles.push('Суперадминистратор')
+    if (roles.length === 0) return 'Пользователь'
+    return roles.join(', ')
+  }
+
   if (!isAuthenticated) {
     return (
       <div className="auth-shell">
@@ -1733,25 +1796,25 @@ async function handleReplaceTag() {
           <button className={`tab ${activeTab === 'tags' ? 'active' : ''}`} onClick={() => navigateToTab('tags')}>
             Метки
           </button>
-          {isAdmin && (
+          {isUserAdmin && (
             <button className={`tab ${activeTab === 'users' ? 'active' : ''}`} onClick={() => navigateToTab('users')}>
               Пользователи
             </button>
           )}
 
-          {isAdmin && (
+          {isDataAdmin && (
             <button className={`tab ${activeTab === 'delete-objects' ? 'active' : ''}`} onClick={() => navigateToTab('delete-objects')}>
               Удаление ИО
             </button>
           )}
 
-          {isAdmin && (
+          {isSuperAdmin && (
             <button className={`tab ${activeTab === 'admin-export' ? 'active' : ''}`} onClick={() => navigateToTab('admin-export')}>
               Экспорт БД
             </button>
           )}
 
-          {isAdmin && (
+          {isDataAdmin && (
             <button className={`tab ${activeTab === 'deleted-objects' ? 'active' : ''}`} onClick={() => navigateToTab('deleted-objects')}>
               Удалённые объекты
             </button>
@@ -1813,9 +1876,25 @@ async function handleReplaceTag() {
             </div>
 
             <div className="row" style={{ marginTop: 16 }}>
-              <button className="btn" onClick={() => void handleSearch()} disabled={loading}>Искать</button>
-              <button className="btn secondary" onClick={() => setFilters(defaultFilters)}>Сбросить</button>
-              <button className="btn secondary" onClick={() => void handleSaveCurrentSearch()} disabled={!hasFilters || loading}>Сохранить запрос</button>
+              <button className="btn" onClick={() => void handleSearch()} disabled={loading}>
+                Обычный поиск
+              </button>
+
+              <button
+                className="btn secondary"
+                onClick={() => setShowComplexQueryBuilder(true)}
+                disabled={loading}
+              >
+                Сложный запрос
+              </button>
+
+              <button className="btn secondary" onClick={() => setFilters(defaultFilters)}>
+                Сбросить
+              </button>
+
+              <button className="btn secondary" onClick={() => void handleSaveCurrentSearch()} disabled={!hasFilters || loading}>
+                Сохранить запрос
+              </button>
             </div>
 
             <div style={{ marginTop: 24 }}>
@@ -1837,6 +1916,47 @@ async function handleReplaceTag() {
                 </div>
               ))}
             </div>
+
+            <SortControls
+              sortConfig={{ field: sortField, direction: sortDirection }}
+              onSortChange={(field) => {
+                setSortField(field)
+                void handleSearch(0)
+              }}
+              onDirectionChange={(direction) => {
+                setSortDirection(direction)
+                void handleSearch(0)
+              }}
+              disabled={loading}
+            />
+
+            {/* Результаты поиска */}
+            <div style={{ marginTop: 24 }}>
+              {(infoObjects?.items ?? []).map((item) => (
+                <div className="card" key={item.id}>
+                  {/* ... карточка результата ... */}
+                </div>
+              ))}
+            </div>
+
+            {/* НОВОЕ: Пагинация */}
+            {infoObjects && infoObjects.pages > 1 && (
+              <Pagination
+                currentPage={infoObjects.page}
+                totalPages={infoObjects.pages}
+                onPageChange={(page) => void handleSearch(page)}
+                disabled={loading}
+              />
+            )}
+
+
+            {showComplexQueryBuilder && (
+              <ComplexQueryBuilder
+                query={complexQuery}
+                onChange={setComplexQuery}
+                onClose={() => setShowComplexQueryBuilder(false)}
+              />
+            )}
           </div>
         )}
 
@@ -2091,15 +2211,36 @@ async function handleReplaceTag() {
                 </div>
 
                 <div className="field">
-                  <label>Роль</label>
-                  <select
-                    className="input"
-                    value={adminCreateUserForm.role}
-                    onChange={(e) => setAdminCreateUserForm((s) => ({ ...s, role: e.target.value }))}
-                  >
-                    <option value="ROLE_USER">ROLE_USER</option>
-                    <option value="ROLE_ADMIN">ROLE_ADMIN</option>
-                  </select>
+                  <label className="radio-line">
+                    <input
+                      type="checkbox"
+                      checked={adminCreateUserForm.is_user_admin}
+                      onChange={(e) => setAdminCreateUserForm((s) => ({ ...s, is_user_admin: e.target.checked }))}
+                    />
+                    <span>Администратор пользователей</span>
+                  </label>
+                </div>
+
+                <div className="field">
+                  <label className="radio-line">
+                    <input
+                      type="checkbox"
+                      checked={adminCreateUserForm.is_data_admin}
+                      onChange={(e) => setAdminCreateUserForm((s) => ({ ...s, is_data_admin: e.target.checked }))}
+                    />
+                    <span>Администратор данных</span>
+                  </label>
+                </div>
+
+                <div className="field">
+                  <label className="radio-line">
+                    <input
+                      type="checkbox"
+                      checked={adminCreateUserForm.is_super_admin}
+                      onChange={(e) => setAdminCreateUserForm((s) => ({ ...s, is_super_admin: e.target.checked }))}
+                    />
+                    <span>Суперадминистратор</span>
+                  </label>
                 </div>
 
                 <button className="btn" type="submit" disabled={loading}>
@@ -2110,30 +2251,31 @@ async function handleReplaceTag() {
 
             <div className="card">
               <h2 className="section-title">Список пользователей</h2>
-
               {adminUsers.length ? (
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>Логин</th>
-                      <th>ФИО</th>
-                      <th>Email</th>
-                      <th>Роль</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {adminUsers.map((user) => (
-                      <tr key={user.id}>
-                        <td>{user.id}</td>
-                        <td>{user.login}</td>
-                        <td>{user.full_name || '—'}</td>
-                        <td>{user.email || '—'}</td>
-                        <td>{user.role}</td>
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="table" style={{ minWidth: '700px' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ minWidth: '50px' }}>ID</th>
+                        <th style={{ minWidth: '120px' }}>Логин</th>
+                        <th style={{ minWidth: '150px' }}>ФИО</th>
+                        <th style={{ minWidth: '180px' }}>Email</th>
+                        <th style={{ minWidth: '180px' }}>Роль</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {adminUsers.map((user) => (
+                        <tr key={user.id}>
+                          <td>{user.id}</td>
+                          <td>{user.login}</td>
+                          <td>{user.full_name || '—'}</td>
+                          <td>{user.email || '—'}</td>
+                          <td>{getUserRoleLabel(user)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               ) : (
                 <div className="muted">Пользователи не загружены.</div>
               )}
@@ -2221,7 +2363,6 @@ async function handleReplaceTag() {
                       <th>Роль</th>
                       <th>Доступ с</th>
                       <th>Доступ по</th>
-                      <th>Права админа</th>
                       <th>Действия</th>
                     </tr>
                   </thead>
@@ -2261,17 +2402,38 @@ async function handleReplaceTag() {
                         </td>
                         <td>
                           {editingUserId === user.id ? (
-                            <select
-                              className="input"
-                              value={editRole}
-                              onChange={(e) => setEditRole(e.target.value)}
-                              style={{ minWidth: 120 }}
-                            >
-                              <option value="ROLE_USER">ROLE_USER</option>
-                              <option value="ROLE_ADMIN">ROLE_ADMIN</option>
-                            </select>
+                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                              <label style={{ fontSize: 12 }}>
+                                <input
+                                  type="checkbox"
+                                  checked={editIsUserAdmin}
+                                  onChange={(e) => setEditIsUserAdmin(e.target.checked)}
+                                /> Администратор пользователей
+                              </label>
+                              <label style={{ fontSize: 12 }}>
+                                <input
+                                  type="checkbox"
+                                  checked={editIsDataAdmin}
+                                  onChange={(e) => setEditIsDataAdmin(e.target.checked)}
+                                /> Администратор данных
+                              </label>
+                              <label style={{ fontSize: 12 }}>
+                                <input
+                                  type="checkbox"
+                                  checked={editIsSuperAdmin}
+                                  onChange={(e) => setEditIsSuperAdmin(e.target.checked)}
+                                /> Суперадминистратор
+                              </label>
+                            </div>
                           ) : (
-                            user.role
+                            (() => {
+                              const roles = []
+                              if (user.is_user_admin) roles.push('Администратор пользователей')
+                              if (user.is_data_admin) roles.push('Администратор данных')
+                              if (user.is_super_admin) roles.push('Суперадминистратор')
+                              if (roles.length === 0) return 'Пользователь'
+                              return roles.join(', ')
+                            })()
                           )}
                         </td>
                         <td>
@@ -2298,40 +2460,6 @@ async function handleReplaceTag() {
                             />
                           ) : (
                             user.access_end ? new Date(user.access_end).toLocaleString() : 'бессрочно'
-                          )}
-                        </td>
-                        <td>
-                          {editingUserId === user.id ? (
-                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                              <label style={{ fontSize: 12 }}>
-                                <input
-                                  type="checkbox"
-                                  checked={editIsUserAdmin}
-                                  onChange={(e) => setEditIsUserAdmin(e.target.checked)}
-                                /> Управление пользователями
-                              </label>
-                              <label style={{ fontSize: 12 }}>
-                                <input
-                                  type="checkbox"
-                                  checked={editIsDataAdmin}
-                                  onChange={(e) => setEditIsDataAdmin(e.target.checked)}
-                                /> Управление данными
-                              </label>
-                              <label style={{ fontSize: 12 }}>
-                                <input
-                                  type="checkbox"
-                                  checked={editIsSuperAdmin}
-                                  onChange={(e) => setEditIsSuperAdmin(e.target.checked)}
-                                /> Суперадмин
-                              </label>
-                            </div>
-                          ) : (
-                            <div style={{ fontSize: 12 }}>
-                              {user.is_user_admin && <span className="badge">Управление пользователями</span>}
-                              {user.is_data_admin && <span className="badge">Управление данными</span>}
-                              {user.is_super_admin && <span className="badge">Суперадмин</span>}
-                              {!user.is_user_admin && !user.is_data_admin && !user.is_super_admin && <span className="muted">—</span>}
-                            </div>
                           )}
                         </td>
                         <td>

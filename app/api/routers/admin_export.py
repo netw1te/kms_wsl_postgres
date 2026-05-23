@@ -3,10 +3,9 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from datetime import datetime
 
-from app.auth import require_admin, CurrentUser
+from app.auth import require_super_admin, CurrentUser
 from app.database import get_db
 from app.services.export_db_service import ExportDBService
-from app.auth import require_super_admin
 
 router = APIRouter(prefix="/admin/export", tags=["Admin Export"])
 

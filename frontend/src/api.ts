@@ -1,4 +1,4 @@
-import type { Credentials } from './types'
+import type {Credentials, InfoObjectPage, SearchFilters} from './types'
 
 export const API_BASE = '/api'
 export const STORAGE_KEY = 'suz_frontend_credentials'
@@ -62,4 +62,58 @@ export async function apiFetchBlob(
   }
 
   return response.blob()
+}
+
+import { ComplexQueryGroup } from './types/complexQuery'
+
+export async function complexSearch(
+  credentials: Credentials,
+  complexQuery: ComplexQueryGroup,
+  page: number = 0,
+  size: number = 20
+): Promise<InfoObjectPage> {
+  const response = await fetch(`${API_BASE}/complex-search?page=${page}&size=${size}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': buildAuthHeader(credentials),
+    },
+    body: JSON.stringify({ root: complexQuery }),
+  })
+
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(text || `HTTP ${response.status}`)
+  }
+
+  return response.json()
+}
+
+import { SortField, SortDirection } from './types'
+
+export async function searchInfoObjects(
+  credentials: Credentials,
+  filters: SearchFilters,
+  page: number = 0,
+  size: number = 20,
+  sort: SortField = 'id',
+  direction: SortDirection = 'asc'
+): Promise<InfoObjectPage> {
+  const params = new URLSearchParams()
+
+  Object.entries(filters).forEach(([key, value]) => {
+    if (!value.trim()) return
+    if (key === 'tags') {
+      parseTags(value).forEach((tag) => params.append('tags', tag))
+    } else {
+      params.set(key, value.trim())
+    }
+  })
+
+  params.set('page', String(page))
+  params.set('size', String(size))
+  params.set('sort', sort)
+  params.set('direction', direction)
+
+  return apiFetch<InfoObjectPage>(`/info-objects/search?${params.toString()}`, credentials)
 }

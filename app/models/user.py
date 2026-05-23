@@ -10,22 +10,19 @@ class User(Base):
     password = Column(String(255), nullable=False)
     full_name = Column(String(255), nullable=True)
     email = Column(String(255), nullable=True)
-    role = Column(String(50), nullable=False, default='ROLE_USER')
+
     access_start = Column(DateTime, nullable=True)
     access_end = Column(DateTime, nullable=True)
 
-    is_data_admin = Column(Boolean, default=False)
     is_user_admin = Column(Boolean, default=False)
+    is_data_admin = Column(Boolean, default=False)
     is_super_admin = Column(Boolean, default=False)
 
-    def is_admin(self) -> bool:
-        return self.role == "ROLE_ADMIN"
+    def can_manage_users(self) -> bool:
+        return self.is_user_admin
 
     def can_manage_data(self) -> bool:
-        return self.is_data_admin or self.role == "ROLE_ADMIN"
-
-    def can_manage_users(self) -> bool:
-        return self.is_user_admin or self.role == "ROLE_ADMIN"
+        return self.is_data_admin
 
     def can_manage_system(self) -> bool:
-        return self.is_super_admin or self.role == "ROLE_ADMIN"
+        return self.is_super_admin

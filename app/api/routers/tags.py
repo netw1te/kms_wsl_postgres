@@ -25,14 +25,16 @@ class TagSearchResponse(BaseModel):
     items: list[str]
 
 
-def ensure_scope_allowed(scope: str, current_user: CurrentUser, db: Session):
-    if scope == "all":
-        user = db.query(User).filter(User.id == current_user.id).first()
-        if not user or (not user.can_manage_data() and user.role != "ROLE_ADMIN"):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Изменение меток для всех ИО доступно только администратору данных.",
-            )
+from app.auth import CurrentUser, get_current_user, require_data_admin
+
+from app.auth import CurrentUser, get_current_user, require_data_admin
+
+def ensure_scope_allowed(scope: str, current_user: CurrentUser):
+    if scope == "all" and not current_user.can_manage_data():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Изменение меток для всех ИО доступно только администратору данных.",
+        )
 
 
 def cleanup_orphan_tag(db: Session, tag: Tag | None) -> None:

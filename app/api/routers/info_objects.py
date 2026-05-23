@@ -1,15 +1,19 @@
 from datetime import datetime
 from typing import List, Optional
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import asc, desc, or_
 from sqlalchemy.orm import Session
 
-from app.auth import CurrentUser, get_current_user, require_admin
+from app.auth import CurrentUser, get_current_user, require_data_admin
 from app.database import get_db
 from app.models.info_object import InfoObject
 from app.services.info_object_service import InfoObjectService
 from app.services.ownership_service import ensure_can_modify_info_object
+from app.services.complex_query_service import ComplexQueryService
+from app.schemas.complex_query import ComplexQuery
 from app.utils.date_parser import normalize_partial_date
 from fastapi.responses import StreamingResponse
 from io import BytesIO
@@ -141,6 +145,88 @@ def apply_payload(info_object: InfoObject, payload: InfoObjectCreate | InfoObjec
     info_object.publication_date = normalized_publication
 
 
+def _apply_simple_search_filters(
+    query,
+    search_everywhere: Optional[str],
+    title: Optional[str],
+    text: Optional[str],
+    author: Optional[str],
+    source: Optional[str],
+    publication_title: Optional[str],
+    url: Optional[str],
+    doi: Optional[str],
+    tags: Optional[List[str]],
+    tag_mode: str,
+    publication_date_from: Optional[datetime],
+    publication_date_to: Optional[datetime],
+):
+    """Применяет простые фильтры поиска (без сложного запроса)"""
+    from sqlalchemy import or_
+    from app.models.info_object import Tag
+
+    if search_everywhere:
+        pattern = f"%{search_everywhere}%"
+        query = query.filter(
+            or_(
+                InfoObject.title.ilike(pattern),
+                InfoObject.content.ilike(pattern),
+                InfoObject.author.ilike(pattern),
+                InfoObject.source.ilike(pattern),
+                InfoObject.publication_title.ilike(pattern),
+                InfoObject.url.ilike(pattern),
+                InfoObject.doi.ilike(pattern),
+            )
+        )
+
+    if title:
+        query = query.filter(InfoObject.title.ilike(f"%{title}%"))
+    if text:
+        query = query.filter(InfoObject.content.ilike(f"%{text}%"))
+    if author:
+        query = query.filter(InfoObject.author.ilike(f"%{author}%"))
+    if source:
+        query = query.filter(InfoObject.source.ilike(f"%{source}%"))
+    if publication_title:
+        query = query.filter(InfoObject.publication_title.ilike(f"%{publication_title}%"))
+    if url:
+        query = query.filter(InfoObject.url.ilike(f"%{url}%"))
+    if doi:
+        query = query.filter(InfoObject.doi.ilike(f"%{doi}%"))
+
+    if tags:
+        if tag_mode.upper() == "OR":
+            query = query.filter(InfoObject.tags.any(Tag.name.in_(tags)))
+        else:
+            for tag_name in tags:
+                query = query.filter(InfoObject.tags.any(Tag.name == tag_name))
+
+    if publication_date_from:
+        query = query.filter(InfoObject.publication_date >= publication_date_from)
+    if publication_date_to:
+        query = query.filter(InfoObject.publication_date <= publication_date_to)
+
+    return query
+
+
+def _paginate(query, page: int, size: int, sort: str, direction: str):
+    """Применяет пагинацию и сортировку к запросу"""
+    sort_field = getattr(InfoObject, sort, InfoObject.id)
+    order_clause = asc(sort_field) if direction.lower() == "asc" else desc(sort_field)
+    query = query.order_by(order_clause)
+
+    total = query.count()
+    items = query.offset(page * size).limit(size).all()
+    pages = (total + size - 1) // size if total else 0
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "size": size,
+        "pages": pages,
+    }
+
+
 @router.get("/my", response_model=PageResponse)
 async def get_my_info_objects(
     page: int = Query(0, ge=0),
@@ -189,11 +275,52 @@ async def search_info_objects(
     size: int = Query(20, ge=1, le=100),
     sort: str = Query("id"),
     direction: str = Query("asc"),
+    # Новый параметр для сложного запроса
+    complex_query_json: str | None = Query(None, description="JSON сложного запроса с операторами И/ИЛИ/НЕ"),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     service = InfoObjectService(db)
 
+    # ========== СЛОЖНЫЙ ЗАПРОС (приоритет) ==========
+    if complex_query_json:
+        try:
+            query_data = json.loads(complex_query_json)
+            complex_query = ComplexQuery(**query_data)
+
+            # Базовый запрос
+            query = db.query(InfoObject)
+
+            # Фильтр удалённых
+            if not include_deleted:
+                query = query.filter(
+                    or_(
+                        InfoObject.deletion_flag.is_(False),
+                        InfoObject.deletion_flag.is_(None),
+                    )
+                )
+
+            # Применяем сложный запрос
+            complex_service = ComplexQueryService(db)
+            query = complex_service.build_query(query, complex_query)
+
+            # Пагинация и сортировка
+            result = _paginate(query, page, size, sort, direction)
+
+            return PageResponse(
+                items=[InfoObjectResponse(**serialize_info_object(item)) for item in result["items"]],
+                total=result["total"],
+                page=result["page"],
+                size=result["size"],
+                pages=result["pages"],
+            )
+
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail=f"Ошибка парсинга JSON сложного запроса: {str(exc)}")
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Ошибка обработки сложного запроса: {str(exc)}")
+
+    # ========== ОБЫЧНЫЙ ПОИСК ==========
     _, publication_date_from = normalize_partial_date(publication_date_from_raw, is_end=False)
     _, publication_date_to = normalize_partial_date(publication_date_to_raw, is_end=True)
 
@@ -228,6 +355,51 @@ async def search_info_objects(
         pages=result["pages"],
     )
 
+
+# ========== НОВЫЙ ЭНДПОИНТ ДЛЯ POST-ЗАПРОСОВ СЛОЖНОГО ПОИСКА ==========
+@router.post("/complex-search", response_model=PageResponse)
+async def complex_search_post(
+    complex_query: ComplexQuery,
+    page: int = Query(0, ge=0),
+    size: int = Query(20, ge=1, le=100),
+    sort: str = Query("id"),
+    direction: str = Query("asc"),
+    include_deleted: bool = Query(False),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Сложный поиск с операторами И/ИЛИ/НЕ.
+    Тело запроса — JSON с описанием условий и групп.
+    """
+    # Базовый запрос
+    query = db.query(InfoObject)
+
+    # Фильтр удалённых
+    if not include_deleted:
+        query = query.filter(
+            or_(
+                InfoObject.deletion_flag.is_(False),
+                InfoObject.deletion_flag.is_(None),
+            )
+        )
+
+    # Применяем сложный запрос
+    complex_service = ComplexQueryService(db)
+    query = complex_service.build_query(query, complex_query)
+
+    # Пагинация и сортировка
+    result = _paginate(query, page, size, sort, direction)
+
+    return PageResponse(
+        items=[InfoObjectResponse(**serialize_info_object(item)) for item in result["items"]],
+        total=result["total"],
+        page=result["page"],
+        size=result["size"],
+        pages=result["pages"],
+    )
+
+
 @router.get("", response_model=PageResponse)
 async def get_all_info_objects(
     page: int = Query(0, ge=0),
@@ -255,6 +427,7 @@ async def get_all_info_objects(
         pages=result["pages"],
     )
 
+
 @router.post("", response_model=InfoObjectResponse, status_code=status.HTTP_201_CREATED)
 async def create_info_object(
     payload: InfoObjectCreate,
@@ -268,6 +441,7 @@ async def create_info_object(
 
     saved = service.save(info_object)
     return InfoObjectResponse(**serialize_info_object(saved))
+
 
 @router.get("/deleted", response_model=PageResponse)
 async def get_deleted_info_objects(
@@ -290,6 +464,7 @@ async def get_deleted_info_objects(
         pages=result["pages"],
     )
 
+
 @router.get("/{info_object_id}", response_model=InfoObjectResponse)
 async def get_info_object_by_id(
     info_object_id: int,
@@ -301,6 +476,7 @@ async def get_info_object_by_id(
     if not info_object:
         raise HTTPException(status_code=404, detail="InfoObject not found")
     return InfoObjectResponse(**serialize_info_object(info_object))
+
 
 @router.put("/{info_object_id}", response_model=InfoObjectResponse)
 async def update_info_object(
@@ -371,7 +547,7 @@ async def hard_delete_info_object(
     ok = service.hard_delete_info_object(info_object_id)
     if not ok:
         raise HTTPException(status_code=404, detail="InfoObject not found")
-    service.delete_by_id(info_object_id)
+
 
 @router.get("/{info_object_id}/export")
 async def export_info_object(
@@ -391,6 +567,6 @@ async def export_info_object(
         BytesIO(data),
         media_type="application/zip",
         headers={
-            "Content-Disposition": f'attachment; filename=\"{filename}\"'
+            "Content-Disposition": f'attachment; filename="{filename}"'
         },
     )

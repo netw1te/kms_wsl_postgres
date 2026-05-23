@@ -1,19 +1,14 @@
 from dataclasses import dataclass
 from typing import Optional
-from app.database import SessionLocal
-
+from datetime import datetime
 
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import get_db, SessionLocal
 from app.models.user import User
-from app.database import SessionLocal
-from app.models.user import User
-
-
 
 security = HTTPBasic(auto_error=False)
 pwd_context = CryptContext(
@@ -28,14 +23,18 @@ class CurrentUser:
     login: str
     full_name: Optional[str]
     email: Optional[str]
-    role: str
+    is_user_admin: bool = False
+    is_data_admin: bool = False
+    is_super_admin: bool = False
 
-    @property
-    def authorities(self) -> list[str]:
-        return [item.strip() for item in self.role.split(",") if item.strip()]
+    def can_manage_users(self) -> bool:
+        return self.is_user_admin
 
-    def is_admin(self) -> bool:
-        return "ROLE_ADMIN" in self.authorities
+    def can_manage_data(self) -> bool:
+        return self.is_data_admin
+
+    def can_manage_system(self) -> bool:
+        return self.is_super_admin
 
 
 class PasswordEncoder:
@@ -46,13 +45,11 @@ class PasswordEncoder:
     @staticmethod
     def verify(raw_password: str, encoded_password: str) -> bool:
         return pwd_context.verify(raw_password, encoded_password)
-    
+
     @staticmethod
     def hash(raw_password: str) -> str:
         return pwd_context.hash(raw_password)
 
-
-from datetime import datetime
 
 def authenticate_user(db: Session, username: str, password: str) -> CurrentUser | None:
     user = db.query(User).filter(User.login == username).first()
@@ -62,10 +59,8 @@ def authenticate_user(db: Session, username: str, password: str) -> CurrentUser 
         return None
 
     now = datetime.now()
-
     if user.access_start and user.access_start > now:
         return None
-
     if user.access_end and user.access_end < now:
         return None
 
@@ -74,60 +69,37 @@ def authenticate_user(db: Session, username: str, password: str) -> CurrentUser 
         login=user.login,
         full_name=user.full_name,
         email=user.email,
-        role=user.role,
+        is_user_admin=user.is_user_admin or False,
+        is_data_admin=user.is_data_admin or False,
+        is_super_admin=user.is_super_admin or False,
     )
-
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from sqlalchemy.orm import Session
-
-from app.database import get_db
-from app.models.user import User
-
-security = HTTPBasic(auto_error=False)
-
-
-class PasswordEncoder:
-    @staticmethod
-    def hash(raw_password: str) -> str:
-        return pwd_context.hash(raw_password)
-
-    @staticmethod
-    def verify(raw_password: str, encoded_password: str) -> bool:
-        return pwd_context.verify(raw_password, encoded_password)
-
-
-from datetime import datetime
-
-def authenticate_user(db: Session, login: str, password: str):
-    user = db.query(User).filter(User.login == login).first()
-    if not user:
-        return None
-
-    if not PasswordEncoder.verify(password, user.password):
-        return None
-
-    now = datetime.now()
-
-    if user.access_start and user.access_start > now:
-        return None
-
-    if user.access_end and user.access_end < now:
-        return None
-
-    return user
 
 
 async def get_current_user(
-    request: Request,
-    db: Session = Depends(get_db),
+        credentials: HTTPBasicCredentials | None = Depends(security),
+        request: Request = None,
+        db: Session = Depends(get_db),
 ):
-    session_user = request.session.get("user")
-    if session_user:
-        user_id = session_user.get("id")
-        user = db.query(User).filter(User.id == user_id).first()
+    if credentials:
+        user = authenticate_user(db, credentials.username, credentials.password)
         if user:
             return user
+
+    if request:
+        session_user = request.session.get("user")
+        if session_user:
+            user_id = session_user.get("id")
+            user = db.query(User).filter(User.id == user_id).first()
+            if user:
+                return CurrentUser(
+                    id=user.id,
+                    login=user.login,
+                    full_name=user.full_name,
+                    email=user.email,
+                    is_user_admin=user.is_user_admin or False,
+                    is_data_admin=user.is_data_admin or False,
+                    is_super_admin=user.is_super_admin or False,
+                )
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -135,54 +107,28 @@ async def get_current_user(
     )
 
 
-def require_admin(current_user=Depends(get_current_user)):
-    if current_user.role != "ROLE_ADMIN":
+def require_user_admin(current_user: CurrentUser = Depends(get_current_user)):
+    if not current_user.can_manage_users():
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied. Admin role required.",
+            detail="Access denied. User admin role required.",
         )
-    return
-
-from app.database import SessionLocal
-from app.models.user import User
-
-async def require_user_admin(current_user: CurrentUser = Depends(get_current_user)):
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.id == current_user.id).first()
-        if not user or not user.can_manage_users():
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied. User admin role required.",
-            )
-        return current_user
-    finally:
-        db.close()
+    return current_user
 
 
-async def require_data_admin(current_user: CurrentUser = Depends(get_current_user)):
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.id == current_user.id).first()
-        if not user or not user.can_manage_data():
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied. Data admin role required.",
-            )
-        return current_user
-    finally:
-        db.close()
+def require_data_admin(current_user: CurrentUser = Depends(get_current_user)):
+    if not current_user.can_manage_data():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied. Data admin role required.",
+        )
+    return current_user
 
 
-async def require_super_admin(current_user: CurrentUser = Depends(get_current_user)):
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.id == current_user.id).first()
-        if not user or not user.can_manage_system():
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied. Super admin role required.",
-            )
-        return current_user
-    finally:
-        db.close()
+def require_super_admin(current_user: CurrentUser = Depends(get_current_user)):
+    if not current_user.can_manage_system():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied. Super admin role required.",
+        )
+    return current_user

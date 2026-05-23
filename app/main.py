@@ -73,3 +73,6 @@ app.include_router(user_agreements_router)
 app.include_router(deletion_requests_router)
 app.include_router(captcha_router)
 app.include_router(admin_export_router)
+from app.api.routers.complex_search import router as complex_search_router
+
+app.include_router(complex_search_router)

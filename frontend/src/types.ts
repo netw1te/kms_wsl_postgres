@@ -96,6 +96,14 @@ export type UserAdminRecord = {
   is_super_admin?: boolean
 }
 
+export type SortField = 'id' | 'title' | 'author' | 'source' | 'publication_title' | 'created_at' | 'updated_at' | 'publication_date'
+export type SortDirection = 'asc' | 'desc'
+
+export interface SortConfig {
+  field: SortField
+  direction: SortDirection
+}
+
 export type DeletionRequestRecord = {
   id: number
   info_object_id: number
@@ -113,3 +121,4 @@ export type DeletionRequestStatus = {
   reason?: string | null
   replacement_info_object_id?: number | null
 }
+

@@ -59,3 +59,10 @@ class InfoObjectResponse(BaseModel):
 
     publication_date_raw: str
     publication_date: datetime
+
+class PageResponse(BaseModel):
+    items: List[InfoObjectResponse]
+    total: int
+    page: int
+    size: int
+    pages: int

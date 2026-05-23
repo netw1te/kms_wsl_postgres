@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth import CurrentUser, get_current_user, require_admin
+from app.auth import CurrentUser, get_current_user, require_data_admin
 from app.database import get_db
 from app.models.info_object import InfoObject
 from app.models.info_object_deletion_request import InfoObjectDeletionRequest
