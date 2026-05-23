@@ -1,6 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { getCaptcha, verifyCaptcha, refreshCaptcha } from './captcha'
-import { exportAllDatabases, exportKmsDatabases, exportUserDatabase } from './adminExport'
+import {
+  exportAllDatabases,
+  exportKmsDatabases,
+  exportUserDatabase,
+  importDatabaseZip,
+} from './adminExport'
 import type {
   AgreementStatus,
   Credentials,
@@ -310,6 +315,8 @@ export default function App() {
   const [isComplexSearch, setIsComplexSearch] = useState(false)
   const [sortField, setSortField] = useState<SortField>('id')
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
+  const [importFile, setImportFile] = useState<File | null>(null)
+  const [importResult, setImportResult] = useState<string>('')
 
   
   const isAuthenticated = !!credentials
@@ -1477,6 +1484,33 @@ async function handleReplaceTag() {
       setLoading(false)
     }
   }
+  async function handleImportDatabase() {
+    if (!credentials || !importFile) return
+
+    const ok = window.confirm(
+      'Импорт изменит данные в текущей базе. Продолжить?'
+    )
+    if (!ok) return
+
+    setLoading(true)
+    setError(null)
+    setImportResult('')
+
+    try {
+      const result = await importDatabaseZip(credentials, importFile)
+
+      setImportResult(
+        `Импорт завершён: пользователей — ${result.users}, ИО — ${result.info_objects}, меток — ${result.tags}, связей меток — ${result.tag_links}, запросов — ${result.search_queries}, файлов — ${result.media_files}, вложений — ${result.attachments}.`
+      )
+
+      setImportFile(null)
+      await loadDashboard()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Ошибка импорта')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   async function handleUpdateUser(userId: number) {
     if (!credentials) return
@@ -1810,7 +1844,7 @@ async function handleReplaceTag() {
 
           {isSuperAdmin && (
             <button className={`tab ${activeTab === 'admin-export' ? 'active' : ''}`} onClick={() => navigateToTab('admin-export')}>
-              Экспорт БД
+              Экспорт/импорт БД
             </button>
           )}
 
@@ -2515,7 +2549,7 @@ async function handleReplaceTag() {
             )}
           </div>
         )}
-        {activeTab === 'admin-export' && isAdmin && (
+        {activeTab === 'admin-export' && isSuperAdmin && (
           <div className="card">
             <h2 className="section-title">Экспорт баз данных</h2>
             <div className="grid-2" style={{ marginBottom: 24 }}>
@@ -2549,6 +2583,36 @@ async function handleReplaceTag() {
                   }
                 }} disabled={loading}>Экспортировать</button>
               </div>
+            </div>
+            <div className="card">
+              <h3>Импорт БД из ZIP</h3>
+              <p className="muted">
+                Загрузите ZIP-файл, ранее созданный через экспорт БД. Импорт доступен только суперадминистратору.
+              </p>
+
+              <input
+                className="input"
+                type="file"
+                accept=".zip"
+                onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
+              />
+
+              <div className="row" style={{ marginTop: 16 }}>
+                <button
+                  className="btn danger"
+                  type="button"
+                  onClick={() => void handleImportDatabase()}
+                  disabled={loading || !importFile}
+                >
+                  Импортировать ZIP
+                </button>
+              </div>
+
+              {importResult && (
+                <div className="muted" style={{ marginTop: 12 }}>
+                  {importResult}
+                </div>
+              )}
             </div>
           </div>
         )}

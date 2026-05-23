@@ -1,15 +1,15 @@
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
-from datetime import datetime
 
-from fastapi import Depends, HTTPException, status, Request
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
-from app.database import get_db, SessionLocal
+from app.database import get_db
 from app.models.user import User
+
 
 security = HTTPBasic(auto_error=False)
 
@@ -25,21 +25,21 @@ class CurrentUser:
     login: str
     full_name: Optional[str]
     email: Optional[str]
+
+    # Оставляем role для старого кода, где ещё есть проверки current_user.role == "ROLE_ADMIN"
+    role: str = "ROLE_USER"
+
+    # Новая система прав
     is_user_admin: bool = False
-    is_data_admin: bool = False    is_user_admin: bool = False
     is_data_admin: bool = False
     is_super_admin: bool = False
 
-    is_super_admin: bool = False
+    @property
+    def authorities(self) -> list[str]:
+        return [self.role]
 
-    def can_manage_users(self) -> bool:
-        return self.is_user_admin
-
-    def can_manage_data(self) -> bool:
-        return self.is_data_admin
-
-    def can_manage_system(self) -> bool:
-        return self.is_super_admin or self.is_super_admin
+    def is_admin(self) -> bool:
+        return self.is_super_admin or self.is_user_admin or self.is_data_admin or self.role == "ROLE_ADMIN"
 
     def can_manage_users(self) -> bool:
         return self.is_super_admin or self.is_user_admin
@@ -69,25 +69,34 @@ class PasswordEncoder:
 
 
 def user_to_current_user(user: User) -> CurrentUser:
+    is_user_admin = bool(getattr(user, "is_user_admin", False))
+    is_data_admin = bool(getattr(user, "is_data_admin", False))
+    is_super_admin = bool(getattr(user, "is_super_admin", False))
+
+    legacy_role = "ROLE_ADMIN" if (is_user_admin or is_data_admin or is_super_admin) else "ROLE_USER"
+
     return CurrentUser(
         id=user.id,
         login=user.login,
-        full_name=user.full_name,
-        email=user.email,
-        role=user.role,
-        is_user_admin=bool(getattr(user, "is_user_admin", False)),
-        is_data_admin=bool(getattr(user, "is_data_admin", False)),
-        is_super_admin=bool(getattr(user, "is_super_admin", False)),
+        full_name=getattr(user, "full_name", None),
+        email=getattr(user, "email", None),
+        role=legacy_role,
+        is_user_admin=is_user_admin,
+        is_data_admin=is_data_admin,
+        is_super_admin=is_super_admin,
     )
 
 
 def user_has_active_access(user: User) -> bool:
     now = datetime.now()
 
-    if user.access_start and user.access_start > now:
+    access_start = getattr(user, "access_start", None)
+    access_end = getattr(user, "access_end", None)
+
+    if access_start and access_start > now:
         return False
 
-    if user.access_end and user.access_end < now:
+    if access_end and access_end < now:
         return False
 
     return True

@@ -44,7 +44,18 @@ class ExportDBService:
                               'created_by', 'deletion_flag', 'deletion_reason', 'deleted_by',
                               'replacement_info_object_id'], 'info_objects.json'),
                 (Tag, ['id', 'name'], 'tags.json'),
-                (User, ['id', 'login', 'password', 'full_name', 'email', 'role'], 'users.json'),
+                (User, [
+                    'id',
+                    'login',
+                    'password',
+                    'full_name',
+                    'email',
+                    'access_start',
+                    'access_end',
+                    'is_user_admin',
+                    'is_data_admin',
+                    'is_super_admin',
+                ], 'users.json'),
                 (UserAgreement, ['id', 'user_id', 'full_name', 'job_title', 'organization',
                                  'accepted_rules', 'accepted_personal_data', 'accepted_at', 'accepted_ip'], 'user_agreements.json'),
                 (SearchQuery, ['id', 'created_at', 'name', 'search_everywhere', 'title', 'text',
@@ -123,9 +134,13 @@ class ExportDBService:
                 'login': user.login,
                 'full_name': user.full_name,
                 'email': user.email,
-                'role': user.role,
-                'exported_at': datetime.now().isoformat()
-            }
+                'access_start': user.access_start.isoformat() if user.access_start else None,
+                'access_end': user.access_end.isoformat() if user.access_end else None,
+                'is_user_admin': user.is_user_admin,
+                'is_data_admin': user.is_data_admin,
+                'is_super_admin': user.is_super_admin,
+                'exported_at': datetime.now().isoformat(),
+            }   
             zf.writestr(f"{timestamp}/user_{login}.json", json.dumps(user_data, ensure_ascii=False, indent=2).encode('utf-8'))
 
             my_objects = self.db.query(InfoObject).filter(InfoObject.created_by == user.id).all()

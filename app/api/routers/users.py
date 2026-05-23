@@ -1,8 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
-from sqlalchemy.orm import Session
 from datetime import datetime
 from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from app.auth import CurrentUser, PasswordEncoder, get_current_user, require_user_admin
 from app.database import get_db
@@ -151,20 +154,109 @@ async def update_user(
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
-        user_id: int,
-        db: Session = Depends(get_db),
-        current_admin: CurrentUser = Depends(require_user_admin),
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_admin: CurrentUser = Depends(require_user_admin),
 ):
+    if current_admin.id == user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Нельзя удалить текущего пользователя.",
+        )
+
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if user.id == current_admin.id:
-        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+    if bool(getattr(user, "is_super_admin", False)):
+        super_admins_count = (
+            db.query(User)
+            .filter(User.is_super_admin.is_(True))
+            .count()
+        )
+        if super_admins_count <= 1:
+            raise HTTPException(
+                status_code=400,
+                detail="Нельзя удалить последнего суперадминистратора.",
+            )
 
-    db.delete(user)
-    db.commit()
+    def table_exists(table_name: str) -> bool:
+        return db.execute(
+            text("SELECT to_regclass(:table_name)"),
+            {"table_name": table_name},
+        ).scalar() is not None
 
+    def column_exists(table_name: str, column_name: str) -> bool:
+        return bool(
+            db.execute(
+                text(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND table_name = :table_name
+                          AND column_name = :column_name
+                    )
+                    """
+                ),
+                {
+                    "table_name": table_name,
+                    "column_name": column_name,
+                },
+            ).scalar()
+        )
+
+    def delete_refs(table_name: str, column_name: str) -> None:
+        if table_exists(table_name) and column_exists(table_name, column_name):
+            db.execute(
+                text(f"DELETE FROM {table_name} WHERE {column_name} = :user_id"),
+                {"user_id": user_id},
+            )
+
+    def null_refs(table_name: str, column_name: str) -> None:
+        if table_exists(table_name) and column_exists(table_name, column_name):
+            db.execute(
+                text(f"UPDATE {table_name} SET {column_name} = NULL WHERE {column_name} = :user_id"),
+                {"user_id": user_id},
+            )
+
+    try:
+        # Удаляем записи, которые принадлежат пользователю.
+        delete_refs("user_agreements", "user_id")
+
+        # В твоей БД в search_queries есть user_id, но нет created_by.
+        # Поэтому удаляем по каждой колонке только если она реально существует.
+        delete_refs("search_queries", "user_id")
+        delete_refs("search_queries", "created_by")
+
+        delete_refs("info_object_deletion_requests", "requested_by")
+
+        # Данные не удаляем, только отвязываем пользователя.
+        null_refs("info_object_deletion_requests", "reviewed_by")
+
+        null_refs("information_objects", "created_by")
+        null_refs("information_objects", "deleted_by")
+
+        null_refs("media_files", "uploaded_by")
+
+        # После очистки внешних ссылок удаляем самого пользователя.
+        db.execute(
+            text("DELETE FROM users WHERE id = :user_id"),
+            {"user_id": user_id},
+        )
+
+        db.commit()
+
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Пользователь связан с другой таблицей. "
+                "Удаление остановлено, чтобы не повредить данные."
+            ),
+        ) from exc
 
 @router.post("/{user_id}/block")
 async def block_user(
