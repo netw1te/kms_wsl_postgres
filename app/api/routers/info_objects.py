@@ -140,7 +140,7 @@ def apply_payload(info_object: InfoObject, payload: InfoObjectCreate | InfoObjec
 
     raw_publication, normalized_publication = normalize_partial_date(payload.publication_date_raw, is_end=False)
     info_object.publication_date_raw = raw_publication
-    info_object.publication_date = normalized_publication
+    info_object.publication_date = normalized_publication or datetime.utcnow()
 
 
 def _apply_simple_search_filters(
@@ -475,6 +475,8 @@ async def update_info_object(
     apply_payload(info_object, payload)
     info_object.tags = service.get_or_create_tags(payload.tags)
 
+    if info_object.publication_date is None:
+        info_object.publication_date = datetime.utcnow()
     saved = service.save(info_object)
     return InfoObjectResponse(**serialize_info_object(saved))
 
