@@ -22,6 +22,8 @@ class UserResponse(BaseModel):
     is_user_admin: bool = False
     is_data_admin: bool = False
     is_super_admin: bool = False
+    access_start: str | None = None
+    access_end: str | None = None
 
 
 class UserCreateByAdminRequest(BaseModel):
@@ -53,6 +55,8 @@ def serialize_user(user: User) -> UserResponse:
         is_user_admin=user.is_user_admin or False,
         is_data_admin=user.is_data_admin or False,
         is_super_admin=user.is_super_admin or False,
+        access_start=user.access_start.isoformat() if user.access_start else None,
+        access_end=user.access_end.isoformat() if user.access_end else None,
     )
 
 
