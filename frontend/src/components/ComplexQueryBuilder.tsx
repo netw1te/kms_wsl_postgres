@@ -142,7 +142,6 @@ function GroupEditor({ group, onChange, onDelete, depth = 0, parentOperator }: G
     onChange({ ...group, groups: newGroups })
   }
 
-  // Показываем, как эта группа сочетается с родительской
   const getRelationHint = (): string => {
     if (parentOperator === 'AND') {
       return '⚠️ Эта группа будет выполнена вместе (И) с остальными условиями выше'
@@ -235,7 +234,6 @@ function GroupEditor({ group, onChange, onDelete, depth = 0, parentOperator }: G
 }
 
 export function ComplexQueryBuilder({ query, onChange, onClose }: ComplexQueryBuilderProps) {
-  // Примеры запросов для обучения пользователя
   const examples = [
     {
       name: 'Пример 1: И + ИЛИ',

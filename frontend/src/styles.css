@@ -359,7 +359,6 @@ input[type="datetime-local"] {
   border: 1px solid #cbd5e1;
 }
 
-/* Complex Query Builder - улучшенные стили */
 .complex-query-builder .query-description {
   background: #f0f9ff;
   padding: 12px 16px;
@@ -542,7 +541,6 @@ input[type="datetime-local"] {
   padding-top: 16px;
 }
 
-/* Sort Controls */
 .sort-controls {
   display: flex;
   gap: 20px;
@@ -587,7 +585,6 @@ input[type="datetime-local"] {
   cursor: not-allowed;
 }
 
-/* Pagination */
 .pagination {
   display: flex;
   gap: 8px;

@@ -42,7 +42,6 @@ class AdminCreateUserRequest(BaseModel):
     full_name: Optional[str] = None
     email: Optional[str] = None
 
-    # Старое поле оставляем для совместимости со старым frontend.
     role: Optional[str] = None
 
     access_start: Optional[datetime] = None
@@ -184,7 +183,6 @@ async def create_user_by_admin(
         is_super_admin=payload.is_super_admin,
     )
 
-    # Если в модели/БД ещё есть старое поле role, заполняем его.
     if hasattr(user, "role"):
         user.role = role_from_flags(
             role=payload.role,
@@ -229,7 +227,6 @@ async def delete_user(
             )
 
     try:
-        # 1. Удаляем записи, которые принадлежат пользователю.
         delete_refs(db, "user_agreements", "user_id", user_id)
 
         delete_refs(db, "search_queries", "user_id", user_id)
@@ -237,8 +234,6 @@ async def delete_user(
 
         delete_refs(db, "info_object_deletion_requests", "requested_by", user_id)
 
-        # 2. Там, где пользователь был только связанным лицом,
-        # данные не удаляем, а очищаем ссылку.
         null_refs(db, "info_object_deletion_requests", "reviewed_by", user_id)
 
         null_refs(db, "information_objects", "created_by", user_id)
@@ -246,7 +241,6 @@ async def delete_user(
 
         null_refs(db, "media_files", "uploaded_by", user_id)
 
-        # 3. После очистки внешних ссылок удаляем самого пользователя.
         db.execute(
             text("DELETE FROM users WHERE id = :user_id"),
             {"user_id": user_id},

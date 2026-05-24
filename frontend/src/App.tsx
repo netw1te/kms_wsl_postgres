@@ -654,7 +654,6 @@ export default function App() {
     setError(null)
 
     try {
-      // Используем POST с телом запроса
       const response = await fetch(`/api/complex-search?page=0&size=20&sort=${sortField}&direction=${sortDirection}`, {
         method: 'POST',
         headers: {
@@ -1965,9 +1964,6 @@ async function handleReplaceTag() {
               disabled={loading}
             />
 
-            {/* Результаты поиска */}
-
-            {/* НОВОЕ: Пагинация */}
             {infoObjects && infoObjects.pages > 1 && (
               <Pagination
                 currentPage={infoObjects.page}

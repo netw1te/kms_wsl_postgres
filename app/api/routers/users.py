@@ -222,17 +222,13 @@ async def delete_user(
             )
 
     try:
-        # Удаляем записи, которые принадлежат пользователю.
         delete_refs("user_agreements", "user_id")
 
-        # В твоей БД в search_queries есть user_id, но нет created_by.
-        # Поэтому удаляем по каждой колонке только если она реально существует.
         delete_refs("search_queries", "user_id")
         delete_refs("search_queries", "created_by")
 
         delete_refs("info_object_deletion_requests", "requested_by")
 
-        # Данные не удаляем, только отвязываем пользователя.
         null_refs("info_object_deletion_requests", "reviewed_by")
 
         null_refs("information_objects", "created_by")
@@ -240,7 +236,6 @@ async def delete_user(
 
         null_refs("media_files", "uploaded_by")
 
-        # После очистки внешних ссылок удаляем самого пользователя.
         db.execute(
             text("DELETE FROM users WHERE id = :user_id"),
             {"user_id": user_id},
