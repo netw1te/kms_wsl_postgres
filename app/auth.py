@@ -71,7 +71,12 @@ def user_to_current_user(user: User) -> CurrentUser:
     is_data_admin = bool(getattr(user, "is_data_admin", False))
     is_super_admin = bool(getattr(user, "is_super_admin", False))
 
-    legacy_role = "ROLE_ADMIN" if (is_user_admin or is_data_admin or is_super_admin) else "ROLE_USER"
+    db_role = getattr(user, "role", "ROLE_USER")
+
+    if db_role == "ROLE_ADMIN" or is_user_admin or is_data_admin or is_super_admin:
+        legacy_role = "ROLE_ADMIN"
+    else:
+        legacy_role = "ROLE_USER"
 
     return CurrentUser(
         id=user.id,

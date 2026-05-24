@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -69,18 +69,16 @@ def role_from_flags(
 
 
 def serialize_user(user: User) -> UserResponse:
-    role = getattr(user, "role", None) or role_from_flags(
-        is_user_admin=bool(getattr(user, "is_user_admin", False)),
-        is_data_admin=bool(getattr(user, "is_data_admin", False)),
-        is_super_admin=bool(getattr(user, "is_super_admin", False)),
-    )
+    role_val = getattr(user, "role", "ROLE_USER")
+    if role_val == "ROLE_USER" and (user.is_user_admin or user.is_data_admin or user.is_super_admin):
+        role_val = "ROLE_ADMIN"
 
     return UserResponse(
         id=user.id,
         login=user.login,
         full_name=user.full_name,
         email=user.email,
-        role=role,
+        role=role_val,
         access_start=getattr(user, "access_start", None),
         access_end=getattr(user, "access_end", None),
         is_user_admin=bool(getattr(user, "is_user_admin", False)),
