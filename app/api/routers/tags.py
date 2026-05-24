@@ -29,7 +29,7 @@ from app.auth import CurrentUser, get_current_user, require_data_admin
 
 from app.auth import CurrentUser, get_current_user, require_data_admin
 
-def ensure_scope_allowed(scope: str, current_user: CurrentUser):
+def ensure_scope_allowed(scope: str, current_user: CurrentUser, db: Session):
     if scope == "all" and not current_user.can_manage_data():
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -51,7 +51,7 @@ async def search_tags(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    query = db.query(Tag).filter(Tag.info_objects.any())
+    query = db.query(Tag)
 
     if q.strip():
         query = query.filter(Tag.name.ilike(f"%{q.strip()}%"))
@@ -59,6 +59,26 @@ async def search_tags(
     items = query.order_by(Tag.name.asc()).limit(50).all()
     return TagSearchResponse(items=[item.name for item in items])
 
+
+@router.post("")
+async def create_tag(
+        payload: dict,
+        db: Session = Depends(get_db),
+        current_user: CurrentUser = Depends(get_current_user),
+):
+    name = payload.get("name")
+    if not name or not name.strip():
+        raise HTTPException(status_code=400, detail="Имя тега обязательно.")
+
+    tag = db.query(Tag).filter(Tag.name == name.strip()).first()
+    if tag:
+        raise HTTPException(status_code=400, detail="Тег уже существует.")
+
+    new_tag = Tag(name=name.strip())
+    db.add(new_tag)
+    db.commit()
+    db.refresh(new_tag)
+    return {"id": new_tag.name, "name": new_tag.name, "linkedObjectsCount": 0}
 
 @router.post("/replace")
 async def replace_tag(

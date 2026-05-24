@@ -19,7 +19,6 @@ class UserResponse(BaseModel):
     login: str
     full_name: str | None = None
     email: str | None = None
-    role: str | None = None
     is_user_admin: bool = False
     is_data_admin: bool = False
     is_super_admin: bool = False
@@ -51,7 +50,6 @@ def serialize_user(user: User) -> UserResponse:
         login=user.login,
         full_name=user.full_name,
         email=user.email,
-        role=user.role or "ROLE_USER",
         is_user_admin=user.is_user_admin or False,
         is_data_admin=user.is_data_admin or False,
         is_super_admin=user.is_super_admin or False,
@@ -59,13 +57,14 @@ def serialize_user(user: User) -> UserResponse:
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_me(current_user: CurrentUser = Depends(get_current_user)):
+async def get_me(
+        current_user: CurrentUser = Depends(get_current_user),
+):
     return UserResponse(
         id=current_user.id,
         login=current_user.login,
         full_name=current_user.full_name,
         email=current_user.email,
-        role=getattr(current_user, 'role', 'ROLE_USER'),
         is_user_admin=current_user.is_user_admin,
         is_data_admin=current_user.is_data_admin,
         is_super_admin=current_user.is_super_admin,
@@ -87,6 +86,10 @@ async def create_user_by_admin(
         db: Session = Depends(get_db),
         current_admin: CurrentUser = Depends(require_user_admin),
 ):
+    if current_admin.is_user_admin and not current_admin.is_super_admin:
+        if payload.is_data_admin or payload.is_super_admin:
+            raise HTTPException(status_code=403, detail="У вас нет прав на назначение данных ролей.")
+
     login = payload.login.strip()
     password = payload.password.strip()
 

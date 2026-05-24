@@ -118,6 +118,8 @@ class InfoObjectService:
         return self.repository.exists_by_id(info_object_id)
 
     def save(self, info_object: InfoObject) -> InfoObject:
+        if not info_object.publication_date:
+            info_object.publication_date = datetime.utcnow()
         return self.repository.save(info_object)
 
     def delete_by_id(self, info_object_id: int) -> None:
