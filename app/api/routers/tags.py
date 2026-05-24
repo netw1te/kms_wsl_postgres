@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.auth import CurrentUser, get_current_user
 from app.database import get_db
 from app.models.info_object import InfoObject, Tag
-
+from app.models.user import User
 
 router = APIRouter(prefix="/tags", tags=["Метки"])
 
@@ -13,24 +13,29 @@ router = APIRouter(prefix="/tags", tags=["Метки"])
 class TagReplaceRequest(BaseModel):
     old_tag: str
     new_tag: str
-    scope: str = "mine"  # mine | all
+    scope: str = "mine"
 
 
 class TagDeleteRequest(BaseModel):
     tag: str
-    scope: str = "mine"  # mine | all
+    scope: str = "mine"
 
 
 class TagSearchResponse(BaseModel):
     items: list[str]
 
 
+from app.auth import CurrentUser, get_current_user, require_data_admin
+
+from app.auth import CurrentUser, get_current_user, require_data_admin
+
 def ensure_scope_allowed(scope: str, current_user: CurrentUser):
-    if scope == "all" and current_user.role != "ROLE_ADMIN":
+    if scope == "all" and not current_user.can_manage_data():
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Изменение меток для всех ИО доступно только администратору.",
+            detail="Изменение меток для всех ИО доступно только администратору данных.",
         )
+
 
 def cleanup_orphan_tag(db: Session, tag: Tag | None) -> None:
     if tag is None:
@@ -39,16 +44,14 @@ def cleanup_orphan_tag(db: Session, tag: Tag | None) -> None:
     if not tag.info_objects:
         db.delete(tag)
 
+
 @router.get("", response_model=TagSearchResponse)
 async def search_tags(
     q: str = "",
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    query = (
-        db.query(Tag)
-        .filter(Tag.info_objects.any())
-    )
+    query = db.query(Tag).filter(Tag.info_objects.any())
 
     if q.strip():
         query = query.filter(Tag.name.ilike(f"%{q.strip()}%"))
@@ -56,13 +59,14 @@ async def search_tags(
     items = query.order_by(Tag.name.asc()).limit(50).all()
     return TagSearchResponse(items=[item.name for item in items])
 
+
 @router.post("/replace")
 async def replace_tag(
     payload: TagReplaceRequest,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    ensure_scope_allowed(payload.scope, current_user)
+    ensure_scope_allowed(payload.scope, current_user, db)
 
     old_tag_name = payload.old_tag.strip()
     new_tag_name = payload.new_tag.strip()
@@ -105,7 +109,7 @@ async def delete_tag_from_objects(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    ensure_scope_allowed(payload.scope, current_user)
+    ensure_scope_allowed(payload.scope, current_user, db)
 
     tag_name = payload.tag.strip()
     if not tag_name:
