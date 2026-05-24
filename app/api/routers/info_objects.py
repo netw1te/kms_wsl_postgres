@@ -158,7 +158,6 @@ def _apply_simple_search_filters(
     publication_date_from: Optional[datetime],
     publication_date_to: Optional[datetime],
 ):
-    """Применяет простые фильтры поиска (без сложного запроса)"""
     from sqlalchemy import or_
     from app.models.info_object import Tag
 
@@ -207,7 +206,6 @@ def _apply_simple_search_filters(
 
 
 def _paginate(query, page: int, size: int, sort: str, direction: str):
-    """Применяет пагинацию и сортировку к запросу"""
     sort_field = getattr(InfoObject, sort, InfoObject.id)
     order_clause = asc(sort_field) if direction.lower() == "asc" else desc(sort_field)
     query = query.order_by(order_clause)
@@ -273,23 +271,19 @@ async def search_info_objects(
     size: int = Query(20, ge=1, le=100),
     sort: str = Query("id"),
     direction: str = Query("asc"),
-    # Новый параметр для сложного запроса
     complex_query_json: str | None = Query(None, description="JSON сложного запроса с операторами И/ИЛИ/НЕ"),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     service = InfoObjectService(db)
 
-    # ========== СЛОЖНЫЙ ЗАПРОС (приоритет) ==========
     if complex_query_json:
         try:
             query_data = json.loads(complex_query_json)
             complex_query = ComplexQuery(**query_data)
 
-            # Базовый запрос
             query = db.query(InfoObject)
 
-            # Фильтр удалённых
             if not include_deleted:
                 query = query.filter(
                     or_(
@@ -298,11 +292,9 @@ async def search_info_objects(
                     )
                 )
 
-            # Применяем сложный запрос
             complex_service = ComplexQueryService(db)
             query = complex_service.build_query(query, complex_query)
 
-            # Пагинация и сортировка
             result = _paginate(query, page, size, sort, direction)
 
             return PageResponse(
@@ -318,7 +310,6 @@ async def search_info_objects(
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Ошибка обработки сложного запроса: {str(exc)}")
 
-    # ========== ОБЫЧНЫЙ ПОИСК ==========
     _, publication_date_from = normalize_partial_date(publication_date_from_raw, is_end=False)
     _, publication_date_to = normalize_partial_date(publication_date_to_raw, is_end=True)
 
@@ -354,7 +345,6 @@ async def search_info_objects(
     )
 
 
-# ========== НОВЫЙ ЭНДПОИНТ ДЛЯ POST-ЗАПРОСОВ СЛОЖНОГО ПОИСКА ==========
 @router.post("/complex-search", response_model=PageResponse)
 async def complex_search_post(
     complex_query: ComplexQuery,
@@ -366,14 +356,8 @@ async def complex_search_post(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    """
-    Сложный поиск с операторами И/ИЛИ/НЕ.
-    Тело запроса — JSON с описанием условий и групп.
-    """
-    # Базовый запрос
     query = db.query(InfoObject)
 
-    # Фильтр удалённых
     if not include_deleted:
         query = query.filter(
             or_(
@@ -382,11 +366,9 @@ async def complex_search_post(
             )
         )
 
-    # Применяем сложный запрос
     complex_service = ComplexQueryService(db)
     query = complex_service.build_query(query, complex_query)
 
-    # Пагинация и сортировка
     result = _paginate(query, page, size, sort, direction)
 
     return PageResponse(

@@ -26,10 +26,8 @@ class CurrentUser:
     full_name: Optional[str]
     email: Optional[str]
 
-    # Оставляем role для старого кода, где ещё есть проверки current_user.role == "ROLE_ADMIN"
     role: str = "ROLE_USER"
 
-    # Новая система прав
     is_user_admin: bool = False
     is_data_admin: bool = False
     is_super_admin: bool = False

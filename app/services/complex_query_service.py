@@ -8,13 +8,11 @@ from app.schemas.complex_query import ComplexQuery, ComplexQueryGroup, ComplexQu
 
 
 class ComplexQueryService:
-    """Построитель SQLAlchemy запросов из структуры сложного запроса"""
 
     def __init__(self, db: Session):
         self.db = db
 
     def _build_condition(self, condition: ComplexQueryCondition) -> Any:
-        """Построение одного условия"""
         field = condition.field
         operator = condition.operator
         value = condition.value.lower().strip()
@@ -22,9 +20,7 @@ class ComplexQueryService:
         if not value:
             return None
 
-        # Поле может быть в InfoObject или меткой
         if field == "tag":
-            # Для меток используем exists подзапрос
             tag_subquery = (
                 self.db.query(Tag)
                 .join(InfoObject.tags)
@@ -34,7 +30,6 @@ class ComplexQueryService:
             )
             condition_expr = tag_subquery
         else:
-            # Обычное поле InfoObject
             column = getattr(InfoObject, field, None)
             if column is None:
                 return None
@@ -48,23 +43,19 @@ class ComplexQueryService:
             else:
                 condition_expr = column.ilike(f"%{value}%")
 
-        # Применяем НЕ если нужно
         if condition.negated:
             return not_(condition_expr)
 
         return condition_expr
 
     def _build_group(self, group: ComplexQueryGroup) -> Any:
-        """Рекурсивное построение группы условий"""
         conditions = []
 
-        # Обрабатываем прямые условия
         for cond in group.conditions:
             expr = self._build_condition(cond)
             if expr is not None:
                 conditions.append(expr)
 
-        # Обрабатываем вложенные группы
         for sub_group in group.groups:
             sub_expr = self._build_group(sub_group)
             if sub_expr is not None:
@@ -73,14 +64,12 @@ class ComplexQueryService:
         if not conditions:
             return None
 
-        # Применяем оператор группы
         if group.operator == "AND":
             return and_(*conditions)
         else:  # OR
             return or_(*conditions)
 
     def build_query(self, query: Query, complex_query: ComplexQuery) -> Query:
-        """Применяет сложный запрос к существующему Query"""
         if not complex_query or not complex_query.root:
             return query
 

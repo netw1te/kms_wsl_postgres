@@ -11,7 +11,6 @@ from app.services.complex_query_service import ComplexQueryService
 
 
 def serialize_info_object(obj: InfoObject) -> dict:
-    """Сериализует InfoObject в словарь для Pydantic модели"""
     return {
         "id": obj.id,
         "title": obj.title,
@@ -53,12 +52,10 @@ async def complex_search(
         db: Session = Depends(get_db),
         current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Сложный поиск с операторами И/ИЛИ/НЕ"""
     service = ComplexQueryService(db)
 
     query = db.query(InfoObject)
 
-    # Фильтр по deleted (если не нужно показывать удалённые)
     if not include_deleted:
         query = query.filter(
             or_(
@@ -67,7 +64,6 @@ async def complex_search(
             )
         )
 
-    # Применяем сложный запрос
     try:
         query = service.build_query(query, complex_query)
     except Exception as exc:
@@ -76,20 +72,15 @@ async def complex_search(
             detail=f"Ошибка построения сложного запроса: {str(exc)}"
         )
 
-    # Пагинация
     total = query.count()
 
-    # Сортировка
     sort_field = getattr(InfoObject, sort, InfoObject.id)
     order_clause = asc(sort_field) if direction.lower() == "asc" else desc(sort_field)
 
-    # Получаем элементы
     items = query.order_by(order_clause).offset(page * size).limit(size).all()
 
-    # Вычисляем количество страниц
     pages = (total + size - 1) // size if total else 0
 
-    # Сериализуем результат
     serialized_items = []
     for item in items:
         try:
