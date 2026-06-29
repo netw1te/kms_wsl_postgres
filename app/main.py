@@ -21,6 +21,7 @@ from app.api.routers.captcha import router as captcha_router
 from app.api.routers.admin_export import router as admin_export_router
 from app.services.info_object_service import InfoObjectService
 from app.api.routers.admin_import import router as admin_import_router
+from app.api.routers.audio import router as audio_router
 
 
 @asynccontextmanager
@@ -111,6 +112,7 @@ app.include_router(deletion_requests_router)
 app.include_router(captcha_router)
 app.include_router(admin_export_router)
 app.include_router(admin_import_router)
+app.include_router(audio_router)
 from app.api.routers.complex_search import router as complex_search_router
 
 app.include_router(complex_search_router)

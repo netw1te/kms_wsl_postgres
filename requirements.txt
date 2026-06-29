@@ -9,3 +9,5 @@ itsdangerous
 pillow
 starlette
 python-multipart
+openai-whisper
+imageio-ffmpeg>=0.4.9
