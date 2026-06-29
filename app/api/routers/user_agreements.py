@@ -1,3 +1,4 @@
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -65,6 +66,7 @@ async def accept_my_agreement(
     item.organization = payload.organization.strip()
     item.accepted_rules = True
     item.accepted_personal_data = True
+    item.accepted_at = datetime.now()
     item.accepted_ip = request.client.host if request.client else None
 
     db.commit()

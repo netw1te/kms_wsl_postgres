@@ -18,6 +18,9 @@ def main() -> None:
                 full_name='Администратор',
                 email='admin@example.com',
                 role='ROLE_ADMIN',
+                is_user_admin=False,
+                is_data_admin=False,
+                is_super_admin=True,
             )
             db.add(admin)
 
@@ -28,6 +31,9 @@ def main() -> None:
                 full_name='Пользователь',
                 email='user@example.com',
                 role='ROLE_USER',
+                is_user_admin=False,
+                is_data_admin=False,
+                is_super_admin=False,
             )
             db.add(user)
 

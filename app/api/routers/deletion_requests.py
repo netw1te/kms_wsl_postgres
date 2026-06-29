@@ -10,8 +10,6 @@ from app.models.info_object import InfoObject
 from app.models.info_object_deletion_request import InfoObjectDeletionRequest
 from app.auth import require_data_admin
 
-
-
 router = APIRouter(prefix="/deletion-requests", tags=["Запросы на удаление"])
 
 
@@ -56,10 +54,10 @@ def serialize_request(item: InfoObjectDeletionRequest) -> DeletionRequestRespons
     status_code=status.HTTP_201_CREATED,
 )
 async def create_deletion_request(
-    info_object_id: int,
-    payload: DeletionRequestCreate,
-    db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+        info_object_id: int,
+        payload: DeletionRequestCreate,
+        db: Session = Depends(get_db),
+        current_user: CurrentUser = Depends(get_current_user),
 ):
     info_object = db.query(InfoObject).filter(InfoObject.id == info_object_id).first()
     if info_object is None:
@@ -107,8 +105,8 @@ async def create_deletion_request(
 
 @router.get("", response_model=list[DeletionRequestResponse])
 async def list_deletion_requests(
-    db: Session = Depends(get_db),
-    current_admin: CurrentUser = Depends(require_data_admin),
+        db: Session = Depends(get_db),
+        current_admin: CurrentUser = Depends(require_data_admin),
 ):
     items = (
         db.query(InfoObjectDeletionRequest)
@@ -132,9 +130,9 @@ async def list_deletion_requests(
 
 @router.post("/{request_id}/approve-delete", status_code=status.HTTP_204_NO_CONTENT)
 async def approve_delete_request(
-    request_id: int,
-    db: Session = Depends(get_db),
-    current_admin: CurrentUser = Depends(require_data_admin),
+        request_id: int,
+        db: Session = Depends(get_db),
+        current_admin: CurrentUser = Depends(require_data_admin),
 ):
     item = (
         db.query(InfoObjectDeletionRequest)
@@ -172,14 +170,24 @@ async def approve_delete_request(
     db.commit()
 
 
+@router.delete("/{request_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def reject_deletion_request(request_id: int, db: Session = Depends(get_db),
+                                  current_admin: CurrentUser = Depends(require_data_admin)):
+    req = db.query(InfoObjectDeletionRequest).filter(InfoObjectDeletionRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Запрос не найден")
+    db.delete(req)
+    db.commit()
+
+
 @router.get(
     "/info-objects/{info_object_id}/status",
     response_model=DeletionRequestStatusResponse,
 )
 async def get_deletion_request_status(
-    info_object_id: int,
-    db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+        info_object_id: int,
+        db: Session = Depends(get_db),
+        current_user: CurrentUser = Depends(get_current_user),
 ):
     info_object = db.query(InfoObject).filter(InfoObject.id == info_object_id).first()
     if info_object is None:

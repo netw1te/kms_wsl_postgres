@@ -25,12 +25,12 @@ class CurrentUser:
     login: str
     full_name: Optional[str]
     email: Optional[str]
-
     role: str = "ROLE_USER"
-
     is_user_admin: bool = False
     is_data_admin: bool = False
     is_super_admin: bool = False
+    access_start: Optional[datetime] = None
+    access_end: Optional[datetime] = None
 
     @property
     def authorities(self) -> list[str]:
@@ -70,14 +70,11 @@ def user_to_current_user(user: User) -> CurrentUser:
     is_user_admin = bool(getattr(user, "is_user_admin", False))
     is_data_admin = bool(getattr(user, "is_data_admin", False))
     is_super_admin = bool(getattr(user, "is_super_admin", False))
-
     db_role = getattr(user, "role", "ROLE_USER")
-
     if db_role == "ROLE_ADMIN" or is_user_admin or is_data_admin or is_super_admin:
         legacy_role = "ROLE_ADMIN"
     else:
         legacy_role = "ROLE_USER"
-
     return CurrentUser(
         id=user.id,
         login=user.login,
@@ -87,6 +84,8 @@ def user_to_current_user(user: User) -> CurrentUser:
         is_user_admin=is_user_admin,
         is_data_admin=is_data_admin,
         is_super_admin=is_super_admin,
+        access_start=getattr(user, "access_start", None),
+        access_end=getattr(user, "access_end", None),
     )
 
 

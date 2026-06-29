@@ -10,7 +10,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - kms_postgres_data:/var/lib/postgresql/data
+      - kms_postgres_data:/opt/KMS01/data/
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U kms_user -d kms_db"]
       interval: 10s

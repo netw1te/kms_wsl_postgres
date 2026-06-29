@@ -44,12 +44,12 @@ class InfoObject(Base):
     author = Column(String(255))
     doi = Column(String(255))
 
-    publication_title = Column(String(500))
+    publication_title = Column(String(255), nullable=True)
 
-    publication_date_from_raw = Column(String(20))
-    publication_date_to_raw = Column(String(20))
-    publication_date_from = Column(DateTime, nullable=True)
-    publication_date_to = Column(DateTime, nullable=True)
+    publication_date_from_raw = Column(String(100), nullable=True)
+    publication_date_to_raw = Column(String(100), nullable=True)
+    publication_date_from = Column(DateTime(timezone=True), nullable=True)
+    publication_date_to = Column(DateTime(timezone=True), nullable=True)
     publication_date_raw = Column(String(20), nullable=False)
     publication_date = Column(DateTime, nullable=False)
 
@@ -60,9 +60,14 @@ class InfoObject(Base):
 
     deletion_flag = Column(Boolean, default=False, nullable=False)
     deletion_reason = Column(String(500))
-    deleted_by = Column(Integer, nullable=True)
+    deleted_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     deleted_at = Column(DateTime, nullable=True)
 
+    replacement_info_id = Column(
+        Integer,
+        ForeignKey("information_objects.info_id"),
+        nullable=True,
+    )
     replacement_info_object_id = Column(
         Integer,
         ForeignKey("information_objects.info_id"),

@@ -90,8 +90,9 @@ async def login_submit(
 
     if captcha_record.text.upper() != captcha_code.strip().upper():
         return templates.TemplateResponse(
-            "login.html",
-            {"request": request, "error": "Неверный код с картинки", "session_user": None},
+            request=request,
+            name="login.html",
+            context={"request": request, "error": "Неверный код с картинки", "session_user": None},
             status_code=401,
         )
 

@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
+from sqlalchemy import text, inspect
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.api.routers.files import router as files_router
@@ -22,19 +22,54 @@ from app.api.routers.admin_export import router as admin_export_router
 from app.services.info_object_service import InfoObjectService
 from app.api.routers.admin_import import router as admin_import_router
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
 
+    inspector = inspect(engine)
+
+    users_columns = [col["name"] for col in inspector.get_columns("users")]
+    info_objects_columns = [col["name"] for col in inspector.get_columns("information_objects")]
+
     with engine.begin() as conn:
-        conn.execute(
-            text(
-                """
-                ALTER TABLE information_objects
-                ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL
-                """
-            )
-        )
+        if "organization" not in users_columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN organization VARCHAR(255) NULL"))
+        if "position" not in users_columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN position VARCHAR(255) NULL"))
+        if "rules_accepted_at" not in users_columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN rules_accepted_at TIMESTAMP WITH TIME ZONE NULL"))
+        if "registration_ip" not in users_columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN registration_ip VARCHAR(45) NULL"))
+        if "phone" not in users_columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN phone VARCHAR(20) NULL"))
+        if "comment" not in users_columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN comment VARCHAR(200) NULL"))
+        if "access_start" not in users_columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN access_start DATE NULL"))
+        if "access_end" not in users_columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN access_end DATE NULL"))
+
+        if "deleted_at" not in info_objects_columns:
+            conn.execute(text("ALTER TABLE information_objects ADD COLUMN deleted_at TIMESTAMP NULL"))
+        if "publication_title" not in info_objects_columns:
+            conn.execute(text("ALTER TABLE information_objects ADD COLUMN publication_title VARCHAR(255) NULL"))
+        if "publication_date_from" not in info_objects_columns:
+            conn.execute(
+                text("ALTER TABLE information_objects ADD COLUMN publication_date_from TIMESTAMP WITH TIME ZONE NULL"))
+        if "publication_date_to" not in info_objects_columns:
+            conn.execute(
+                text("ALTER TABLE information_objects ADD COLUMN publication_date_to TIMESTAMP WITH TIME ZONE NULL"))
+        if "publication_date_from_raw" not in info_objects_columns:
+            conn.execute(text("ALTER TABLE information_objects ADD COLUMN publication_date_from_raw VARCHAR(100) NULL"))
+        if "publication_date_to_raw" not in info_objects_columns:
+            conn.execute(text("ALTER TABLE information_objects ADD COLUMN publication_date_to_raw VARCHAR(100) NULL"))
+        if "deleted_by" not in info_objects_columns:
+            conn.execute(
+                text("ALTER TABLE information_objects ADD COLUMN deleted_by INTEGER REFERENCES users(id) NULL"))
+        if "replacement_info_id" not in info_objects_columns:
+            conn.execute(text(
+                "ALTER TABLE information_objects ADD COLUMN replacement_info_id INTEGER REFERENCES information_objects(info_id) NULL"))
 
     db = SessionLocal()
     try:
@@ -46,6 +81,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title=APP_TITLE, lifespan=lifespan)
+
 
 app.add_middleware(
     CORSMiddleware,
