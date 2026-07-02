@@ -5,11 +5,13 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import asc, desc, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased, joinedload
 
 from app.auth import CurrentUser, get_current_user, require_data_admin
 from app.database import get_db
-from app.models.info_object import InfoObject
+from app.models.info_object import InfoObject, Tag
+from app.models.user import User
+from app.models.info_object_deletion_request import InfoObjectDeletionRequest
 from app.services.info_object_service import InfoObjectService
 from app.services.ownership_service import ensure_can_modify_info_object
 from app.services.complex_query_service import ComplexQueryService
@@ -18,8 +20,6 @@ from app.utils.date_parser import normalize_partial_date
 from fastapi.responses import StreamingResponse
 from io import BytesIO
 from app.services.export_service import ExportService
-from app.auth import require_data_admin
-
 
 router = APIRouter(prefix="/info-objects", tags=["Информационные объекты"])
 
@@ -62,6 +62,7 @@ class InfoObjectResponse(BaseModel):
     content: Optional[str] = None
     source: Optional[str] = None
     author: Optional[str] = None
+    author_name: Optional[str] = None
     url: Optional[str] = None
     doi: Optional[str] = None
 
@@ -95,12 +96,23 @@ class PageResponse(BaseModel):
 
 
 def serialize_info_object(obj: InfoObject) -> dict:
+    resolved_author = obj.author
+    if obj.author_user and obj.author_user.full_name:
+        resolved_author = obj.author_user.full_name
+    elif obj.author_user and obj.author_user.login:
+        resolved_author = obj.author_user.login
+    elif obj.creator and obj.creator.full_name:
+        resolved_author = obj.creator.full_name
+    elif obj.creator and obj.creator.login:
+        resolved_author = obj.creator.login
+
     return {
         "id": obj.id,
         "title": obj.title,
         "content": obj.content,
         "source": obj.source,
-        "author": obj.author,
+        "author": resolved_author,
+        "author_name": obj.creator.full_name if (obj.creator and obj.creator.full_name) else None,
         "url": obj.url,
         "doi": obj.doi,
         "publication_title": obj.publication_title,
@@ -144,22 +156,30 @@ def apply_payload(info_object: InfoObject, payload: InfoObjectCreate | InfoObjec
 
 
 def _apply_simple_search_filters(
-    query,
-    search_everywhere: Optional[str],
-    title: Optional[str],
-    text: Optional[str],
-    author: Optional[str],
-    source: Optional[str],
-    publication_title: Optional[str],
-    url: Optional[str],
-    doi: Optional[str],
-    tags: Optional[List[str]],
-    tag_mode: str,
-    publication_date_from: Optional[datetime],
-    publication_date_to: Optional[datetime],
+        query,
+        search_everywhere: Optional[str],
+        title: Optional[str],
+        text: Optional[str],
+        author: Optional[str],
+        source: Optional[str],
+        publication_title: Optional[str],
+        url: Optional[str],
+        doi: Optional[str],
+        tags: Optional[List[str]],
+        tag_mode: str,
+        publication_date_from: Optional[datetime],
+        publication_date_to: Optional[datetime],
 ):
-    from sqlalchemy import or_
-    from app.models.info_object import Tag
+    SearchUser = aliased(User)
+
+    if search_everywhere or author:
+        query = query.outerjoin(
+            SearchUser,
+            or_(
+                InfoObject.created_by == SearchUser.id,
+                InfoObject.author == SearchUser.login
+            )
+        )
 
     if search_everywhere:
         pattern = f"%{search_everywhere}%"
@@ -172,6 +192,8 @@ def _apply_simple_search_filters(
                 InfoObject.publication_title.ilike(pattern),
                 InfoObject.url.ilike(pattern),
                 InfoObject.doi.ilike(pattern),
+                SearchUser.full_name.ilike(pattern),
+                SearchUser.login.ilike(pattern),
             )
         )
 
@@ -180,7 +202,14 @@ def _apply_simple_search_filters(
     if text:
         query = query.filter(InfoObject.content.ilike(f"%{text}%"))
     if author:
-        query = query.filter(InfoObject.author.ilike(f"%{author}%"))
+        pattern = f"%{author}%"
+        query = query.filter(
+            or_(
+                InfoObject.author.ilike(pattern),
+                SearchUser.full_name.ilike(pattern),
+                SearchUser.login.ilike(pattern),
+            )
+        )
     if source:
         query = query.filter(InfoObject.source.ilike(f"%{source}%"))
     if publication_title:
@@ -211,6 +240,13 @@ def _paginate(query, page: int, size: int, sort: str, direction: str):
     query = query.order_by(order_clause)
 
     total = query.count()
+
+    query = query.options(
+        joinedload(InfoObject.creator),
+        joinedload(InfoObject.author_user),
+        joinedload(InfoObject.tags)
+    )
+
     items = query.offset(page * size).limit(size).all()
     pages = (total + size - 1) // size if total else 0
 
@@ -225,13 +261,13 @@ def _paginate(query, page: int, size: int, sort: str, direction: str):
 
 @router.get("/my", response_model=PageResponse)
 async def get_my_info_objects(
-    page: int = Query(0, ge=0),
-    size: int = Query(20, ge=1, le=100),
-    sort: str = Query("id"),
-    direction: str = Query("asc"),
-    include_deleted: bool = Query(False),
-    db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+        page: int = Query(0, ge=0),
+        size: int = Query(20, ge=1, le=100),
+        sort: str = Query("id"),
+        direction: str = Query("asc"),
+        include_deleted: bool = Query(False),
+        db: Session = Depends(get_db),
+        current_user: CurrentUser = Depends(get_current_user),
 ):
     service = InfoObjectService(db)
     result = service.find_my(
@@ -254,43 +290,33 @@ async def get_my_info_objects(
 
 @router.get("/search", response_model=PageResponse)
 async def search_info_objects(
-    search_everywhere: str | None = Query(None),
-    title: str | None = Query(None),
-    text: str | None = Query(None),
-    author: str | None = Query(None),
-    source: str | None = Query(None),
-    publication_title: str | None = Query(None),
-    url: str | None = Query(None),
-    doi: str | None = Query(None),
-    tags: list[str] | None = Query(None),
-    tag_mode: str = Query("AND", pattern="^(AND|OR)$"),
-    publication_date_from_raw: str | None = Query(None),
-    publication_date_to_raw: str | None = Query(None),
-    include_deleted: bool = Query(False),
-    page: int = Query(0, ge=0),
-    size: int = Query(20, ge=1, le=100),
-    sort: str = Query("id"),
-    direction: str = Query("asc"),
-    complex_query_json: str | None = Query(None, description="JSON сложного запроса с операторами И/ИЛИ/НЕ"),
-    db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+        search_everywhere: str | None = Query(None),
+        title: str | None = Query(None),
+        text: str | None = Query(None),
+        author: str | None = Query(None),
+        source: str | None = Query(None),
+        publication_title: str | None = Query(None),
+        url: str | None = Query(None),
+        doi: str | None = Query(None),
+        tags: list[str] | None = Query(None),
+        tag_mode: str = Query("AND", pattern="^(AND|OR)$"),
+        publication_date_from_raw: str | None = Query(None),
+        publication_date_to_raw: str | None = Query(None),
+        include_deleted: bool = Query(False),
+        page: int = Query(0, ge=0),
+        size: int = Query(20, ge=1, le=100),
+        sort: str = Query("id"),
+        direction: str = Query("asc"),
+        complex_query_json: str | None = Query(None),
+        db: Session = Depends(get_db),
+        current_user: CurrentUser = Depends(get_current_user),
 ):
-    service = InfoObjectService(db)
-
     if complex_query_json:
         try:
             query_data = json.loads(complex_query_json)
             complex_query = ComplexQuery(**query_data)
 
             query = db.query(InfoObject)
-
-            if not include_deleted:
-                query = query.filter(
-                    or_(
-                        InfoObject.deletion_flag.is_(False),
-                        InfoObject.deletion_flag.is_(None),
-                    )
-                )
 
             complex_service = ComplexQueryService(db)
             query = complex_service.build_query(query, complex_query)
@@ -313,28 +339,25 @@ async def search_info_objects(
     _, publication_date_from = normalize_partial_date(publication_date_from_raw, is_end=False)
     _, publication_date_to = normalize_partial_date(publication_date_to_raw, is_end=True)
 
-    try:
-        result = service.search(
-            search_everywhere=search_everywhere,
-            title=title,
-            text=text,
-            author=author,
-            source=source,
-            publication_title=publication_title,
-            url=url,
-            doi=doi,
-            tags=tags,
-            tag_mode=tag_mode,
-            publication_date_from=publication_date_from,
-            publication_date_to=publication_date_to,
-            include_deleted=include_deleted,
-            page=page,
-            size=size,
-            sort=sort,
-            direction=direction,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    query = db.query(InfoObject)
+
+    query = _apply_simple_search_filters(
+        query=query,
+        search_everywhere=search_everywhere,
+        title=title,
+        text=text,
+        author=author,
+        source=source,
+        publication_title=publication_title,
+        url=url,
+        doi=doi,
+        tags=tags,
+        tag_mode=tag_mode,
+        publication_date_from=publication_date_from,
+        publication_date_to=publication_date_to,
+    )
+
+    result = _paginate(query, page, size, sort, direction)
 
     return PageResponse(
         items=[InfoObjectResponse(**serialize_info_object(item)) for item in result["items"]],
@@ -347,24 +370,16 @@ async def search_info_objects(
 
 @router.post("/complex-search", response_model=PageResponse)
 async def complex_search_post(
-    complex_query: ComplexQuery,
-    page: int = Query(0, ge=0),
-    size: int = Query(20, ge=1, le=100),
-    sort: str = Query("id"),
-    direction: str = Query("asc"),
-    include_deleted: bool = Query(False),
-    db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+        complex_query: ComplexQuery,
+        page: int = Query(0, ge=0),
+        size: int = Query(20, ge=1, le=100),
+        sort: str = Query("id"),
+        direction: str = Query("asc"),
+        include_deleted: bool = Query(False),
+        db: Session = Depends(get_db),
+        current_user: CurrentUser = Depends(get_current_user),
 ):
     query = db.query(InfoObject)
-
-    if not include_deleted:
-        query = query.filter(
-            or_(
-                InfoObject.deletion_flag.is_(False),
-                InfoObject.deletion_flag.is_(None),
-            )
-        )
 
     complex_service = ComplexQueryService(db)
     query = complex_service.build_query(query, complex_query)
@@ -382,13 +397,13 @@ async def complex_search_post(
 
 @router.get("", response_model=PageResponse)
 async def get_all_info_objects(
-    page: int = Query(0, ge=0),
-    size: int = Query(20, ge=1, le=100),
-    sort: str = Query("id"),
-    direction: str = Query("asc"),
-    include_deleted: bool = Query(False),
-    db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+        page: int = Query(0, ge=0),
+        size: int = Query(20, ge=1, le=100),
+        sort: str = Query("id"),
+        direction: str = Query("asc"),
+        include_deleted: bool = Query(False),
+        db: Session = Depends(get_db),
+        current_user: CurrentUser = Depends(get_current_user),
 ):
     service = InfoObjectService(db)
     result = service.find_all(
@@ -410,9 +425,9 @@ async def get_all_info_objects(
 
 @router.post("", response_model=InfoObjectResponse, status_code=status.HTTP_201_CREATED)
 async def create_info_object(
-    payload: InfoObjectCreate,
-    db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+        payload: InfoObjectCreate,
+        db: Session = Depends(get_db),
+        current_user: CurrentUser = Depends(get_current_user),
 ):
     service = InfoObjectService(db)
     info_object = InfoObject(created_by=current_user.id)
@@ -425,12 +440,12 @@ async def create_info_object(
 
 @router.get("/deleted", response_model=PageResponse)
 async def get_deleted_info_objects(
-    page: int = Query(0, ge=0),
-    size: int = Query(20, ge=1, le=100),
-    sort: str = Query("deleted_at"),
-    direction: str = Query("desc"),
-    db: Session = Depends(get_db),
-    current_admin: CurrentUser = Depends(require_data_admin),
+        page: int = Query(0, ge=0),
+        size: int = Query(20, ge=1, le=100),
+        sort: str = Query("deleted_at"),
+        direction: str = Query("desc"),
+        db: Session = Depends(get_db),
+        current_admin: CurrentUser = Depends(require_data_admin),
 ):
     service = InfoObjectService(db)
     service.purge_deleted_older_than(days=7)
@@ -447,33 +462,51 @@ async def get_deleted_info_objects(
 
 @router.get("/{info_object_id}", response_model=InfoObjectResponse)
 async def get_info_object_by_id(
-    info_object_id: int,
-    db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+        info_object_id: int,
+        db: Session = Depends(get_db),
+        current_user: CurrentUser = Depends(get_current_user),
 ):
-    service = InfoObjectService(db)
-    info_object = service.find_by_id(info_object_id)
-    if not info_object:
+    item = (
+        db.query(InfoObject)
+        .options(
+            joinedload(InfoObject.creator),
+            joinedload(InfoObject.author_user),
+            joinedload(InfoObject.tags)
+        )
+        .filter(InfoObject.id == info_object_id)
+        .first()
+    )
+    if not item:
         raise HTTPException(status_code=404, detail="InfoObject not found")
-    return InfoObjectResponse(**serialize_info_object(info_object))
+    return InfoObjectResponse(**serialize_info_object(item))
 
 
 @router.put("/{info_object_id}", response_model=InfoObjectResponse)
 async def update_info_object(
-    info_object_id: int,
-    payload: InfoObjectUpdate,
-    db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+        info_object_id: int,
+        payload: InfoObjectUpdate,
+        db: Session = Depends(get_db),
+        current_user: CurrentUser = Depends(get_current_user),
 ):
     service = InfoObjectService(db)
-    info_object = service.find_by_id(info_object_id)
+    info_object = (
+        db.query(InfoObject)
+        .options(joinedload(InfoObject.tags))
+        .filter(InfoObject.id == info_object_id)
+        .first()
+    )
     if not info_object:
         raise HTTPException(status_code=404, detail="InfoObject not found")
 
     ensure_can_modify_info_object(current_user, info_object)
 
     apply_payload(info_object, payload)
-    info_object.tags = service.get_or_create_tags(payload.tags)
+
+    info_object.tags.clear()
+    db.flush()
+
+    new_tags = service.get_or_create_tags(payload.tags)
+    info_object.tags.extend(new_tags)
 
     if info_object.publication_date is None:
         info_object.publication_date = datetime.utcnow()
@@ -483,11 +516,11 @@ async def update_info_object(
 
 @router.patch("/{info_object_id}/soft-delete", response_model=InfoObjectResponse)
 async def soft_delete_info_object(
-    info_object_id: int,
-    reason: str | None = Query(None),
-    replacement_info_object_id: int | None = Query(None),
-    db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+        info_object_id: int,
+        reason: str | None = Query(None),
+        replacement_info_object_id: int | None = Query(None),
+        db: Session = Depends(get_db),
+        current_user: CurrentUser = Depends(get_current_user),
 ):
     service = InfoObjectService(db)
     info_object = service.find_by_id(info_object_id)
@@ -502,15 +535,32 @@ async def soft_delete_info_object(
     info_object.replacement_info_object_id = replacement_info_object_id
     info_object.deleted_at = datetime.utcnow()
 
-    saved = service.save(info_object)
-    return InfoObjectResponse(**serialize_info_object(saved))
+    # Also automatically file a deletion request so it is visible to Admins
+    existing_req = db.query(InfoObjectDeletionRequest).filter(
+        InfoObjectDeletionRequest.info_object_id == info_object_id,
+        InfoObjectDeletionRequest.status == "pending"
+    ).first()
+
+    if not existing_req:
+        new_req = InfoObjectDeletionRequest(
+            info_object_id=info_object_id,
+            requested_by=current_user.id,
+            reason=reason,
+            replacement_info_object_id=replacement_info_object_id,
+            status="pending"
+        )
+        db.add(new_req)
+
+    db.commit()
+    db.refresh(info_object)
+    return InfoObjectResponse(**serialize_info_object(info_object))
 
 
 @router.patch("/{info_object_id}/restore", response_model=InfoObjectResponse)
 async def restore_info_object(
-    info_object_id: int,
-    db: Session = Depends(get_db),
-    current_admin: CurrentUser = Depends(require_data_admin),
+        info_object_id: int,
+        db: Session = Depends(get_db),
+        current_admin: CurrentUser = Depends(require_data_admin),
 ):
     service = InfoObjectService(db)
     restored = service.restore_info_object(info_object_id)
@@ -521,9 +571,9 @@ async def restore_info_object(
 
 @router.delete("/{info_object_id}/hard-delete", status_code=status.HTTP_204_NO_CONTENT)
 async def hard_delete_info_object(
-    info_object_id: int,
-    db: Session = Depends(get_db),
-    current_admin: CurrentUser = Depends(require_data_admin),
+        info_object_id: int,
+        db: Session = Depends(get_db),
+        current_admin: CurrentUser = Depends(require_data_admin),
 ):
     service = InfoObjectService(db)
     ok = service.hard_delete_info_object(info_object_id)
@@ -533,9 +583,9 @@ async def hard_delete_info_object(
 
 @router.get("/{info_object_id}/export")
 async def export_info_object(
-    info_object_id: int,
-    db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+        info_object_id: int,
+        db: Session = Depends(get_db),
+        current_user: CurrentUser = Depends(get_current_user),
 ):
     service = ExportService(db)
     info_object = service.get_info_object_or_none(info_object_id)

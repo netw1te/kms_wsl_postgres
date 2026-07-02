@@ -29,6 +29,7 @@ information_objects_tags = Table(
         ForeignKey("tags.id", ondelete="CASCADE"),
         primary_key=True,
     ),
+    keep_existing=True,
 )
 
 
@@ -78,6 +79,20 @@ class InfoObject(Base):
         "Tag",
         secondary=information_objects_tags,
         back_populates="info_objects",
+    )
+
+    creator = relationship(
+        "User",
+        primaryjoin="InfoObject.created_by == User.id",
+        foreign_keys="[InfoObject.created_by]",
+        uselist=False,
+    )
+
+    author_user = relationship(
+        "User",
+        primaryjoin="InfoObject.author == User.login",
+        foreign_keys="[InfoObject.author]",
+        uselist=False,
     )
 
 

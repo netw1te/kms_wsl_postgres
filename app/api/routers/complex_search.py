@@ -1,6 +1,7 @@
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import asc, desc, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.auth import CurrentUser, get_current_user
 from app.database import get_db
@@ -11,12 +12,23 @@ from app.services.complex_query_service import ComplexQueryService
 
 
 def serialize_info_object(obj: InfoObject) -> dict:
+    resolved_author = obj.author
+    if obj.author_user and obj.author_user.full_name:
+        resolved_author = obj.author_user.full_name
+    elif obj.author_user and obj.author_user.login:
+        resolved_author = obj.author_user.login
+    elif obj.creator and obj.creator.full_name:
+        resolved_author = obj.creator.full_name
+    elif obj.creator and obj.creator.login:
+        resolved_author = obj.creator.login
+
     return {
         "id": obj.id,
         "title": obj.title,
         "content": obj.content,
         "source": obj.source,
-        "author": obj.author,
+        "author": resolved_author,
+        "author_name": obj.creator.full_name if (obj.creator and obj.creator.full_name) else None,
         "url": obj.url,
         "doi": obj.doi,
         "publication_title": obj.publication_title,
@@ -56,14 +68,6 @@ async def complex_search(
 
     query = db.query(InfoObject)
 
-    if not include_deleted:
-        query = query.filter(
-            or_(
-                InfoObject.deletion_flag.is_(False),
-                InfoObject.deletion_flag.is_(None),
-            )
-        )
-
     try:
         query = service.build_query(query, complex_query)
     except Exception as exc:
@@ -76,6 +80,12 @@ async def complex_search(
 
     sort_field = getattr(InfoObject, sort, InfoObject.id)
     order_clause = asc(sort_field) if direction.lower() == "asc" else desc(sort_field)
+
+    query = query.options(
+        joinedload(InfoObject.creator),
+        joinedload(InfoObject.author_user),
+        joinedload(InfoObject.tags)
+    )
 
     items = query.order_by(order_clause).offset(page * size).limit(size).all()
 

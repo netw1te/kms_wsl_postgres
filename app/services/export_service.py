@@ -10,12 +10,25 @@ from app.models.media_file import MediaFile
 
 
 def _rtf_escape(text: str) -> str:
-    return (
+    text = (
         text.replace("\\", "\\\\")
         .replace("{", "\\{")
         .replace("}", "\\}")
-        .replace("\n", "\\par ")
     )
+
+    result = []
+    for char in text:
+        code = ord(char)
+        if code > 127:
+            if code > 32767:
+                code -= 65536
+            result.append(f"\\u{code}?")
+        elif char == "\n":
+            result.append("\\par ")
+        else:
+            result.append(char)
+
+    return "".join(result)
 
 
 class ExportService:
@@ -38,22 +51,25 @@ class ExportService:
         tags = [tag.name for tag in info_object.tags] if info_object.tags else []
         files_text = "\n".join(file.original_name for file in files) if files else "Нет вложений"
 
+        def _line(label: str, value: str) -> str:
+            return f"\\b {_rtf_escape(label)}\\b0 {_rtf_escape(value)}\\par"
+
         parts = [
             r"{\rtf1\ansi\deff0",
-            r"\b Заголовок:\b0 " + _rtf_escape(info_object.title or "") + r"\par",
-            r"\b Текст:\b0 " + _rtf_escape(info_object.content or "") + r"\par",
-            r"\b Источник:\b0 " + _rtf_escape(info_object.source or "") + r"\par",
-            r"\b Автор:\b0 " + _rtf_escape(info_object.author or "") + r"\par",
-            r"\b DOI:\b0 " + _rtf_escape(info_object.doi or "") + r"\par",
-            r"\b Название публикации:\b0 " + _rtf_escape(info_object.publication_title or "") + r"\par",
-            r"\b URL:\b0 " + _rtf_escape(info_object.url or "") + r"\par",
-            r"\b Дата от:\b0 " + _rtf_escape(info_object.publication_date_from_raw or "") + r"\par",
-            r"\b Дата до:\b0 " + _rtf_escape(info_object.publication_date_to_raw or "") + r"\par",
-            r"\b Метки:\b0 " + _rtf_escape("\n".join(tags) if tags else "") + r"\par",
-            r"\b Номер инф.объекта в БД:\b0 " + str(info_object.id) + r"\par",
-            r"\b Объект создан:\b0 " + str(info_object.created_at) + r"\par",
-            r"\b Создан пользователем:\b0 " + str(info_object.created_by or "") + r"\par",
-            r"\b Вложения:\b0 " + _rtf_escape(files_text) + r"\par",
+            _line("Заголовок:", info_object.title or ""),
+            _line("Текст:", info_object.content or ""),
+            _line("Источник:", info_object.source or ""),
+            _line("Автор:", info_object.author or ""),
+            _line("DOI:", info_object.doi or ""),
+            _line("Название публикации:", info_object.publication_title or ""),
+            _line("URL:", info_object.url or ""),
+            _line("Дата от:", info_object.publication_date_from_raw or ""),
+            _line("Дата до:", info_object.publication_date_to_raw or ""),
+            _line("Метки:", ", ".join(tags) if tags else ""),
+            _line("Номер инф.объекта в БД:", str(info_object.id)),
+            _line("Объект создан:", str(info_object.created_at)),
+            _line("Создан пользователем:", str(info_object.created_by or "")),
+            _line("Вложения:", files_text),
             r"}",
         ]
         return "".join(parts)

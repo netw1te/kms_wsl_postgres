@@ -17,12 +17,6 @@ class InfoObjectService:
         self.db = db
         self.repository = InfoObjectRepository(db)
 
-    def _active_filter(self):
-        return or_(
-            InfoObject.deletion_flag.is_(False),
-            InfoObject.deletion_flag.is_(None),
-        )
-
     def _paginate(self, query, page: int, size: int, sort: str, direction: str):
         sort_column = getattr(InfoObject, sort, InfoObject.id)
 
@@ -56,10 +50,6 @@ class InfoObjectService:
         include_deleted: bool = False,
     ):
         query = self.db.query(InfoObject)
-
-        if not include_deleted:
-            query = query.filter(self._active_filter())
-
         return self._paginate(
             query=query,
             page=page,
@@ -99,9 +89,6 @@ class InfoObjectService:
         query = self.db.query(InfoObject).filter(
             InfoObject.created_by == user_id
         )
-
-        if not include_deleted:
-            query = query.filter(self._active_filter())
 
         return self._paginate(
             query=query,
@@ -182,9 +169,6 @@ class InfoObjectService:
                 )
 
         query = self.db.query(InfoObject)
-
-        if not include_deleted:
-            query = query.filter(self._active_filter())
 
         if search_everywhere:
             pattern = f"%{search_everywhere.strip()}%"
@@ -290,73 +274,57 @@ class InfoObjectService:
         if info_object is None:
             return False
 
-        (
-            self.db.query(InfoObject)
-            .filter(InfoObject.replacement_info_object_id == info_object_id)
-            .update(
-                {InfoObject.replacement_info_object_id: None},
-                synchronize_session=False,
-            )
-        )
+        try:
+            self.db.query(InfoObject).filter(
+                InfoObject.replacement_info_object_id == info_object_id
+            ).update({InfoObject.replacement_info_object_id: None}, synchronize_session=False)
 
-        (
-            self.db.query(InfoObjectDeletionRequest)
-            .filter(
-                InfoObjectDeletionRequest.replacement_info_object_id
-                == info_object_id
-            )
-            .update(
-                {InfoObjectDeletionRequest.replacement_info_object_id: None},
-                synchronize_session=False,
-            )
-        )
+            self.db.query(InfoObject).filter(
+                InfoObject.replacement_info_id == info_object_id
+            ).update({InfoObject.replacement_info_id: None}, synchronize_session=False)
 
-        attachment_rows = (
-            self.db.query(InfoObjectAttachment)
-            .filter(InfoObjectAttachment.info_object_id == info_object_id)
-            .all()
-        )
+            self.db.query(InfoObjectDeletionRequest).filter(
+                InfoObjectDeletionRequest.replacement_info_object_id == info_object_id
+            ).update({InfoObjectDeletionRequest.replacement_info_object_id: None}, synchronize_session=False)
 
-        media_file_ids = [row.media_file_id for row in attachment_rows]
+            self.db.query(InfoObjectDeletionRequest).filter(
+                InfoObjectDeletionRequest.info_object_id == info_object_id
+            ).delete(synchronize_session=False)
 
-        (
-            self.db.query(InfoObjectAttachment)
-            .filter(InfoObjectAttachment.info_object_id == info_object_id)
-            .delete(synchronize_session=False)
-        )
-
-        (
-            self.db.query(InfoObjectDeletionRequest)
-            .filter(InfoObjectDeletionRequest.info_object_id == info_object_id)
-            .delete(synchronize_session=False)
-        )
-
-        for media_file_id in media_file_ids:
-            remaining_links = (
+            attachment_rows = (
                 self.db.query(InfoObjectAttachment)
-                .filter(InfoObjectAttachment.media_file_id == media_file_id)
-                .count()
+                .filter(InfoObjectAttachment.info_object_id == info_object_id)
+                .all()
             )
+            media_file_ids = [row.media_file_id for row in attachment_rows]
 
-            if remaining_links == 0:
-                media_file = (
-                    self.db.query(MediaFile)
-                    .filter(MediaFile.id == media_file_id)
-                    .first()
+            self.db.query(InfoObjectAttachment).filter(
+                InfoObjectAttachment.info_object_id == info_object_id
+            ).delete(synchronize_session=False)
+
+            for media_file_id in media_file_ids:
+                remaining_links = (
+                    self.db.query(InfoObjectAttachment)
+                    .filter(InfoObjectAttachment.media_file_id == media_file_id)
+                    .count()
                 )
+                if remaining_links == 0:
+                    media_file = self.db.query(MediaFile).filter(MediaFile.id == media_file_id).first()
+                    if media_file:
+                        file_path = Path(media_file.file_path)
+                        if file_path.exists():
+                            file_path.unlink()
+                        self.db.delete(media_file)
 
-                if media_file:
-                    file_path = Path(media_file.file_path)
+            info_object.tags.clear()
+            self.db.flush()
 
-                    if file_path.exists():
-                        file_path.unlink()
-
-                    self.db.delete(media_file)
-
-        self.db.delete(info_object)
-        self.db.commit()
-
-        return True
+            self.db.delete(info_object)
+            self.db.commit()
+            return True
+        except Exception:
+            self.db.rollback()
+            return False
 
     def purge_deleted_older_than(self, days: int = 7) -> int:
         cutoff = datetime.utcnow() - timedelta(days=days)

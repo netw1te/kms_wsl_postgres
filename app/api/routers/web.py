@@ -1,9 +1,6 @@
 import re
 from typing import Optional
-from urllib.parse import urlencode
 
-from app.models.search_query import SearchQuery
-from app.services.search_query_service import SearchQueryService
 from fastapi import APIRouter, Depends, Form, Query, Request, UploadFile, File
 from app.services.media_file_service import MediaFileService
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
@@ -499,7 +496,7 @@ async def admin_export_page(
     )
 
 
-@router.get("/logout")
+@router.post("/logout")
 async def logout(request: Request):
     request.session.clear()
     return RedirectResponse(url="/login", status_code=303)

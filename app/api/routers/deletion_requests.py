@@ -176,6 +176,12 @@ async def reject_deletion_request(request_id: int, db: Session = Depends(get_db)
     req = db.query(InfoObjectDeletionRequest).filter(InfoObjectDeletionRequest.id == request_id).first()
     if not req:
         raise HTTPException(status_code=404, detail="Запрос не найден")
+
+    info_object = db.query(InfoObject).filter(InfoObject.id == req.info_object_id).first()
+    if info_object:
+        info_object.deletion_flag = False
+        db.add(info_object)
+
     db.delete(req)
     db.commit()
 

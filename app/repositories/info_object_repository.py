@@ -5,6 +5,7 @@ from sqlalchemy import asc, desc, func, or_
 from sqlalchemy.orm import Session
 
 from app.models.info_object import InfoObject, Tag
+from app.models.user import User
 
 
 class InfoObjectRepository:
@@ -20,15 +21,6 @@ class InfoObjectRepository:
         include_deleted: bool = False,
     ):
         query = self.db.query(InfoObject)
-
-        if not include_deleted:
-            query = query.filter(
-                or_(
-                    InfoObject.deletion_flag.is_(False),
-                    InfoObject.deletion_flag.is_(None),
-                )
-            )
-
         return self._paginate(query, page, size, sort, direction)
 
     def find_deleted_paginated(
@@ -51,15 +43,6 @@ class InfoObjectRepository:
         include_deleted: bool = False,
     ):
         query = self.db.query(InfoObject).filter(InfoObject.created_by == user_id)
-
-        if not include_deleted:
-            query = query.filter(
-                or_(
-                    InfoObject.deletion_flag.is_(False),
-                    InfoObject.deletion_flag.is_(None),
-                )
-            )
-
         return self._paginate(query, page, size, sort, direction)
 
     def search(
@@ -85,6 +68,15 @@ class InfoObjectRepository:
     ):
         query = self.db.query(InfoObject)
 
+        if search_everywhere or author:
+            query = query.outerjoin(
+                User,
+                or_(
+                    InfoObject.created_by == User.id,
+                    InfoObject.author == User.login
+                )
+            )
+
         if search_everywhere:
             pattern = f"%{search_everywhere}%"
             query = query.filter(
@@ -96,6 +88,8 @@ class InfoObjectRepository:
                     InfoObject.publication_title.ilike(pattern),
                     InfoObject.url.ilike(pattern),
                     InfoObject.doi.ilike(pattern),
+                    User.full_name.ilike(pattern),
+                    User.login.ilike(pattern),
                 )
             )
 
@@ -104,7 +98,14 @@ class InfoObjectRepository:
         if text:
             query = query.filter(InfoObject.content.ilike(f"%{text}%"))
         if author:
-            query = query.filter(InfoObject.author.ilike(f"%{author}%"))
+            pattern = f"%{author}%"
+            query = query.filter(
+                or_(
+                    InfoObject.author.ilike(pattern),
+                    User.full_name.ilike(pattern),
+                    User.login.ilike(pattern),
+                )
+            )
         if source:
             query = query.filter(InfoObject.source.ilike(f"%{source}%"))
         if publication_title:
@@ -129,14 +130,6 @@ class InfoObjectRepository:
 
         if publication_date_to is not None:
             query = query.filter(object_start <= publication_date_to)
-
-        if not include_deleted:
-            query = query.filter(
-                or_(
-                    InfoObject.deletion_flag.is_(False),
-                    InfoObject.deletion_flag.is_(None),
-                )
-            )
 
         return self._paginate(query, page, size, sort, direction)
 
