@@ -19,7 +19,6 @@ from app.auth import require_super_admin
 from app.auth import CurrentUser
 
 
-
 router = APIRouter(tags=["Web"])
 templates = Jinja2Templates(directory="templates")
 
